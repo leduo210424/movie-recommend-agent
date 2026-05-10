@@ -1,0 +1,6 @@
+{
+  "source_file": "data/processed/user_history.json",
+  "count": 943,
+  "embedding_dim": 384,
+  "half_life_days": 30.0
+}

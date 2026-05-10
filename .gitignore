@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+.env
+.env.*
+.venv/
+venv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Data (large binary files, processed data)
+data/processed/*.npy
+data/processed/*.faiss
+data/processed/full_data.json
+data/raw/
+
+# API keys & secrets
+.env
+*.key
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Debug artifacts
+output.json
+result_post*.json
+debug_*.py

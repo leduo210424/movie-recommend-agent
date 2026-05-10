@@ -1,0 +1,12 @@
+{
+  "model": "sentence-transformers/all-MiniLM-L6-v2",
+  "count": 1682,
+  "dim": 384,
+  "index_type": "IndexFlatIP",
+  "source_file": "data/processed/movies.json",
+  "multi_granularity_indices": {
+    "plot_index": "movie_plot_index.faiss",
+    "attr_index": "movie_attr_index.faiss",
+    "full_index": "movie_index.faiss"
+  }
+}

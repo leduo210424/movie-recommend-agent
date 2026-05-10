@@ -1,0 +1,13 @@
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.env
+.env.*
+.venv
+venv
+.idea
+.vscode
+data/processed/movie_embeddings.npy
+data/processed/user_embeddings.npy
+data/processed/movie_index.faiss

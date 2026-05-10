@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Movie Recommend Agent</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <div class="page-shell">
+      <div class="bg-glow bg-glow-left"></div>
+      <div class="bg-glow bg-glow-right"></div>
+
+      <main class="app-card">
+        <header class="hero">
+          <div class="eyebrow">Agentic RAG Movie Recommender</div>
+          <h1>电影推荐助手</h1>
+          <p>
+            输入用户 ID 和自然语言需求，系统会结合用户画像、语义检索和解释引擎返回推荐结果。
+          </p>
+        </header>
+
+        <section class="panel form-panel">
+          <div class="panel-title">开始推荐</div>
+          <div class="form-grid">
+            <label>
+              <span>User ID</span>
+              <input id="userId" type="number" min="1" placeholder="例如：1" value="1" />
+            </label>
+            <label>
+              <span>Top K</span>
+              <input id="topK" type="number" min="1" max="20" value="3" />
+            </label>
+            <label>
+              <span>Agent 类型</span>
+              <select id="agentType">
+                <option value="langgraph">LangGraph（规则引擎）</option>
+                <option value="qwen">Qwen（大模型）</option>
+              </select>
+            </label>
+          </div>
+          <label class="query-label">
+            <span>Query</span>
+            <textarea id="query" rows="4" placeholder="例如：想看轻松一点的电影"></textarea>
+          </label>
+          <div class="actions">
+            <button id="recommendBtn">生成推荐</button>
+            <button id="fillExampleBtn" class="ghost-btn" type="button">填充示例</button>
+          </div>
+          <div id="status" class="status">等待输入...</div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-title">路由与决策</div>
+          <div id="decisionCard" class="decision-card muted">暂无结果</div>
+        </section>
+
+        <section class="results-grid">
+          <section class="panel results-panel">
+            <div class="panel-title">推荐结果</div>
+            <div id="results" class="cards"></div>
+          </section>
+          <section class="panel results-panel">
+            <div class="panel-title">推荐解释</div>
+            <div id="explanations" class="cards"></div>
+          </section>
+        </section>
+      </main>
+    </div>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>
