@@ -30,7 +30,7 @@
 
 **修复后**：Agent Top-5 变为《Star Wars》《Schindler's List》《Shawshank》等真正热门电影。Recall 从假象的 2.67\% 变为真实的 5.09\%，差距从 -71\% 缩小到 -44\%。
 
-**文件**：`src/basic_recommender.py`、`src/agentic_recommender.py`
+**文件**：`src/basic_recommender.py`
 
 ---
 
@@ -64,7 +64,7 @@ python src/rag_build_index.py --model sentence-transformers/all-MiniLM-L6-v2
 
 **修复后**：Agent Recall@20 从落后 -44\% 变为领先 +35\%（全量 907 用户）。
 
-**文件**：`src/basic_recommender.py`、`src/agentic_recommender.py`、`evaluate.py`
+**文件**：`src/basic_recommender.py`、`evaluate.py`
 
 ---
 
@@ -117,7 +117,7 @@ args = json.loads(args_raw) if isinstance(args_raw, str) else (args_raw or {})
 
 **根因**：初始 SYSTEM\_PROMPT 采用 Thought/Action/Observation 的 ReAct 文本格式，但 Qwen 的原生 Function Calling 机制期望标准 messages+tool\_calls 交互。LLM 在文本回复中输出 "Thought: ..." 而不触发 tool\_calls。
 
-**修复**：将 SYSTEM\_PROMPT 改为与 `llm_agent.py` 一致的标准 Function Calling 风格。
+**修复**：将 SYSTEM\_PROMPT 改为标准 Function Calling 风格。
 
 ---
 
@@ -166,4 +166,62 @@ beautiful scenery exploration wanderlust inspiring journey'"
 
 ---
 
-*最后更新：2026-05-05*
+---
+## 9. 从 DashScope (Qwen) 迁移到 OpenAI 兼容 API (DeepSeek)
+
+### 9.1 动机
+
+DashScope 免费额度耗尽，无法继续调用 Qwen 系列模型。需要切换到通过 OpenAI 兼容 API 调用 DeepSeek 模型。
+
+### 9.2 变更范围
+
+| 组件 | 变更 |
+|------|------|
+| `requirements.txt` | `dashscope==1.11.0` → `openai>=1.0.0` |
+| `src/react_agent.py` | `QwenLLM` → `DeepSeekLLM`；SDK 从 dashscope 换为 openai |
+| `src/api.py` | 环境变量 `DASHSCOPE_API_KEY` → `DEEPSEEK_API_KEY`；`QWEN_MODEL` → `DEEPSEEK_MODEL`；新增 `DEEPSEEK_BASE_URL` |
+| `evaluate.py` | 同上环境变量 + 类名更新 |
+| `evaluate_prompts.py` | dashscope SDK → openai SDK + DeepSeek |
+| （遗留文件已移除） | — |
+
+默认模型：`deepseek-chat` → `deepseek-v4-flash`
+
+### 9.3 SDK 响应格式差异
+
+**现象**：直接替换 SDK 后 `generate()` 取不到 content/tool_calls。
+
+**根因**：两个 SDK 的响应对象结构完全不同：
+- DashScope：`response.output.choices[0].message["content"]`（dict 访问）
+- OpenAI：`response.choices[0].message.content`（属性访问）
+- OpenAI streaming 中 tool_calls 是增量式（多个 chunk 逐渐拼接），而非一次性返回完整列表
+
+**修复**：
+- `generate()`：改用 `msg.content`、`msg.tool_calls`，遍历 `tc.function.name/arguments`
+- `stream_generate()`：改为累积模式，逐 chunk 将 `tc_delta.function.name/arguments` 拼接到 buffer，最后统一 json.loads + 标准化
+- 提取公共方法 `_normalize_stream_tool_calls()`
+
+### 9.4 WebSocket 连接错误（HTTPException 未被捕获）
+
+**现象**：前端点击"生成推荐"后立即显示"WebSocket 连接错误"，服务器日志无任何异常输出。
+
+**根因**：`api.py` 的 WebSocket handler 中 `agent = _get_agent()` 在 `try/except` 块**外面**。当 `DEEPSEEK_API_KEY` 未设置时，`_get_agent()` 抛出 `HTTPException(500, "DEEPSEEK_API_KEY not set.")`，该异常在 WebSocket 已 accept 但未进入 try 块时传播到 FastAPI 层，导致 WebSocket 异常关闭，前端只收到 `ws.onerror` 无详情。
+
+**修复**：将 `_get_agent()` 移到 `try` 块内部，单独捕获 `HTTPException` 并通过 `ws.send_json({"event": "error", ...})` 发回具体错误信息，让前端能显示"API key not set"而非通用连接错误。
+
+### 9.5 异步流式推理卡死（同步 HTTP 阻塞事件循环）
+
+**现象**：设置正确的 API key 后，前端卡在"正在流式推理中..."，服务器日志除了 WebSocket 连接外无任何后续输出，请求永远不返回。
+
+**根因**：`ReActAgent.astream()` 是 `async def` 函数（由 FastAPI WebSocket 调用），但内部调用了 `DeepSeekLLM.stream_generate()`，后者使用同步 `OpenAI` 客户端做 `client.chat.completions.create(stream=True)`。同步 HTTP 请求在 `for chunk in stream` 迭代时阻塞整个 asyncio 事件循环，导致 WebSocket 无法收发任何数据。
+
+**修复**：`DeepSeekLLM` 中同时维护两个客户端：
+- `self._client = OpenAI(...)` — 供同步路径使用（`generate()`、`stream_generate()`）
+- `self._async_client = AsyncOpenAI(...)` — 供异步路径使用
+
+新增 `astream_generate()` 异步生成器，使用 `await async_client.chat.completions.create(stream=True)` + `async for chunk in stream`。`ReActAgent.astream()` 改为 `async for delta, is_final, tcs in self.llm.astream_generate(...)`。
+
+**文件**：`src/react_agent.py`、`src/api.py`
+
+---
+
+*最后更新：2026-05-26*

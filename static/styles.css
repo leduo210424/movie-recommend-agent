@@ -8,6 +8,7 @@
   --accent: #7db3ff;
   --accent-2: #dce9ff;
   --good: #6ee7c8;
+  --bad: #ff8a8a;
   --shadow: 0 24px 80px rgba(0, 0, 0, 0.32);
 }
 
@@ -113,6 +114,47 @@ body {
   margin-bottom: 14px;
 }
 
+/* ── Session Bar ── */
+
+.session-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 14px 22px;
+}
+
+.session-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.session-label {
+  font-size: 13px;
+  color: var(--muted);
+  letter-spacing: 0.06em;
+}
+
+.session-id {
+  font-family: "SF Mono", "Consolas", monospace;
+  font-size: 13px;
+  color: var(--accent);
+  background: rgba(125, 179, 255, 0.10);
+  padding: 4px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(125, 179, 255, 0.15);
+}
+
+.turn-count {
+  font-size: 13px;
+  color: var(--muted);
+  font-weight: 400;
+  margin-left: 6px;
+}
+
+/* ── Form ── */
+
 .form-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -151,7 +193,7 @@ select:focus {
 
 textarea {
   resize: vertical;
-  min-height: 112px;
+  min-height: 80px;
 }
 
 .query-label {
@@ -186,12 +228,30 @@ button:active {
   transform: translateY(0);
 }
 
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
 .ghost-btn {
   background: transparent;
   color: var(--text);
   border: 1px solid rgba(164, 190, 235, 0.22);
   box-shadow: none;
 }
+
+.ghost-btn:hover {
+  background: rgba(125, 179, 255, 0.08);
+}
+
+.ghost-btn.small {
+  padding: 8px 16px;
+  font-size: 13px;
+  border-radius: 10px;
+}
+
+/* ── Status & Cards ── */
 
 .status,
 .decision-card,
@@ -218,6 +278,60 @@ button:active {
 .empty-state {
   color: var(--muted);
 }
+
+/* ── Conversation Panel ── */
+
+.conversation-list {
+  display: grid;
+  gap: 12px;
+  max-height: 360px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.conversation-list::-webkit-scrollbar {
+  width: 4px;
+}
+
+.conversation-list::-webkit-scrollbar-thumb {
+  background: rgba(125, 179, 255, 0.2);
+  border-radius: 4px;
+}
+
+.conv-turn {
+  padding: 14px;
+  background: rgba(7, 15, 29, 0.52);
+  border: 1px solid rgba(164, 190, 235, 0.14);
+  border-radius: 14px;
+  display: grid;
+  gap: 10px;
+}
+
+.conv-query,
+.conv-response {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  font-size: 14px;
+}
+
+.conv-role {
+  flex-shrink: 0;
+  font-size: 13px;
+  color: var(--muted);
+  min-width: 56px;
+}
+
+.conv-text {
+  color: var(--text);
+  line-height: 1.6;
+}
+
+.conv-response .conv-text {
+  color: var(--accent-2);
+}
+
+/* ── Results Grid ── */
 
 .results-grid {
   display: grid;
@@ -276,6 +390,97 @@ button:active {
   margin-top: 10px;
   color: var(--accent-2);
 }
+
+/* ── Streaming Toggle ── */
+
+.stream-toggle {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.stream-toggle input[type="checkbox"] {
+  width: auto;
+  accent-color: var(--accent);
+}
+
+.stream-live {
+  color: var(--good);
+  font-weight: 600;
+  animation: pulse 1.4s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+/* ── Feedback Buttons ── */
+
+.feedback-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(164, 190, 235, 0.08);
+}
+
+.fb-btn {
+  appearance: none;
+  border: 1px solid rgba(164, 190, 235, 0.18);
+  border-radius: 10px;
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  background: transparent;
+  color: var(--muted);
+  box-shadow: none;
+  transition: all 0.18s ease;
+}
+
+.fb-btn:hover {
+  transform: none;
+}
+
+.fb-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.fb-like:hover:not(:disabled) {
+  border-color: var(--good);
+  color: var(--good);
+  background: rgba(110, 231, 200, 0.08);
+}
+
+.fb-dislike:hover:not(:disabled) {
+  border-color: var(--bad);
+  color: var(--bad);
+  background: rgba(255, 138, 138, 0.08);
+}
+
+.fb-btn.fb-selected {
+  transform: scale(1.02);
+}
+
+.fb-like.fb-selected {
+  border-color: var(--good);
+  color: var(--good);
+  background: rgba(110, 231, 200, 0.14);
+}
+
+.fb-dislike.fb-selected {
+  border-color: var(--bad);
+  color: var(--bad);
+  background: rgba(255, 138, 138, 0.14);
+}
+
+/* ── Responsive ── */
 
 @media (max-width: 900px) {
   .results-grid,

@@ -15,10 +15,17 @@
         <header class="hero">
           <div class="eyebrow">Agentic RAG Movie Recommender</div>
           <h1>电影推荐助手</h1>
-          <p>
-            输入用户 ID 和自然语言需求，系统会结合用户画像、语义检索和解释引擎返回推荐结果。
-          </p>
+          <p>输入自然语言需求，系统结合用户画像、语义检索和解释引擎返回推荐结果。支持多轮对话和实时反馈调整。</p>
         </header>
+
+        <!-- Session Bar -->
+        <section class="panel session-bar">
+          <div class="session-info">
+            <span class="session-label">Session</span>
+            <span id="sessionDisplay" class="session-id">default</span>
+          </div>
+          <button id="newSessionBtn" class="ghost-btn small">新对话</button>
+        </section>
 
         <section class="panel form-panel">
           <div class="panel-title">开始推荐</div>
@@ -35,19 +42,31 @@
               <span>Agent 类型</span>
               <select id="agentType">
                 <option value="langgraph">LangGraph（规则引擎）</option>
-                <option value="qwen">Qwen（大模型）</option>
+                <option value="react">ReAct（大模型 Agent）</option>
               </select>
             </label>
           </div>
           <label class="query-label">
             <span>Query</span>
-            <textarea id="query" rows="4" placeholder="例如：想看轻松一点的电影"></textarea>
+            <textarea id="query" rows="3" placeholder="例如：想看轻松一点的电影"></textarea>
           </label>
           <div class="actions">
             <button id="recommendBtn">生成推荐</button>
             <button id="fillExampleBtn" class="ghost-btn" type="button">填充示例</button>
+            <label class="stream-toggle">
+              <input type="checkbox" id="streamMode" checked />
+              <span>流式输出 (WebSocket)</span>
+            </label>
           </div>
           <div id="status" class="status">等待输入...</div>
+        </section>
+
+        <!-- Conversation History -->
+        <section class="panel" id="conversationPanel">
+          <div class="panel-title">对话历史 <span id="turnCount" class="turn-count"></span></div>
+          <div id="conversation" class="conversation-list">
+            <div class="empty-state">暂无对话历史。输入查询开始对话。</div>
+          </div>
         </section>
 
         <section class="panel">

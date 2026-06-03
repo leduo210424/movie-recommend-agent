@@ -1,5 +1,5 @@
 """
-System Prompt 量化对比实验：测试不同 Prompt 对 Qwen Agent Tool Calling 质量的影响。
+System Prompt 量化对比实验：测试不同 Prompt 对 Agent Tool Calling 质量的影响。
 
 指标：
   - 工具选择准确率：LLM 调用的工具是否与预期一致
@@ -138,17 +138,14 @@ def evaluate_prompt(
         return result
 
     try:
-        import dashscope
-        from dashscope import Generation
+        from openai import OpenAI
     except ImportError:
-        print("  [SKIP] dashscope not installed in current Python")
+        print("  [SKIP] openai not installed in current Python")
         return result
 
-    dashscope.api_key = api_key
+    client = OpenAI(api_key=api_key, base_url="https://api.deepseek.com")
 
-    from src.llm_agent import QwenAgent
-
-    tools = QwenAgent.TOOLS
+    from src.react_agent import TOOLS as tools
     tool_names = {t["function"]["name"] for t in tools}
 
     result.total_cases = len(TEST_CASES)
@@ -170,7 +167,7 @@ def evaluate_prompt(
             print(f"    Expected: {expected_tools}")
 
         try:
-            response = Generation.call(
+            response = client.chat.completions.create(
                 model=model,
                 messages=messages,
                 tools=tools,
@@ -179,29 +176,11 @@ def evaluate_prompt(
                 top_p=0.5,
             )
 
-            if response.status_code != 200:
-                detail = {
-                    "case": desc,
-                    "query": query,
-                    "expected": expected_tools,
-                    "actual_tools": [],
-                    "accurate": False,
-                    "success": False,
-                    "error": str(response.message),
-                }
-                result.details.append(detail)
-                continue
-
-            message = response.output.choices[0].message
-            tool_calls = getattr(message, 'tool_calls', None) or []
+            msg = response.choices[0].message
+            tool_calls = msg.tool_calls or []
             called_tools = []
             for tc in tool_calls:
-                # 兼容 dashscope SDK 不同版本：可能是对象或 dict
-                if isinstance(tc, dict):
-                    func = tc.get("function", {})
-                    name = func.get("name", "") if isinstance(func, dict) else getattr(func, "name", "")
-                else:
-                    name = getattr(tc.function, "name", "")
+                name = tc.function.name
                 if name:
                     called_tools.append(name)
 
@@ -287,16 +266,16 @@ def main():
     parser = argparse.ArgumentParser(description="Compare System Prompt variants for Qwen Agent")
     parser.add_argument("--prompt", choices=list(PROMPT_VARIANTS.keys()),
                         help="Test only one specific prompt variant")
-    parser.add_argument("--model", default="qwen-plus", help="Qwen model to use")
+    parser.add_argument("--model", default="deepseek-chat", help="DeepSeek model to use")
     parser.add_argument("--dry-run", action="store_true",
                         help="Print test cases without making API calls")
     args = parser.parse_args()
 
-    api_key = os.getenv("DASHSCOPE_API_KEY", "")
+    api_key = os.getenv("DEEPSEEK_API_KEY", "")
     if not api_key and not args.dry_run:
-        print("请设置 DASHSCOPE_API_KEY 环境变量")
-        print("  export DASHSCOPE_API_KEY=sk-xxxx  (Linux/Mac)")
-        print("  set DASHSCOPE_API_KEY=sk-xxxx      (Windows)")
+        print("请设置 DEEPSEEK_API_KEY 环境变量")
+        print("  export DEEPSEEK_API_KEY=sk-xxxx  (Linux/Mac)")
+        print("  set DEEPSEEK_API_KEY=sk-xxxx      (Windows)")
         sys.exit(1)
 
     print(f"测试用例数: {len(TEST_CASES)}")

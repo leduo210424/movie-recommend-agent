@@ -282,6 +282,68 @@ class UserMemoryStore:
         (output_path / "user_memory_meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
 
     @staticmethod
+    def update_profile_with_feedback(
+        profiles_dir: str | Path,
+        user_id: int,
+        movie_embedding: np.ndarray,
+        feedback: str = "like",
+        alpha: float = 0.05,
+    ) -> Dict[str, Any]:
+        """根据用户反馈在线微调用户画像向量。like:靠近 dislike:远离。"""
+        import json
+
+        output_dir = Path(profiles_dir)
+        embeddings_path = output_dir / "user_embeddings.npy"
+        ids_path = output_dir / "user_ids.npy"
+
+        if not embeddings_path.exists() or not ids_path.exists():
+            return {"status": "skipped", "reason": "用户画像文件不存在", "user_id": user_id}
+
+        user_embeddings = np.load(embeddings_path).astype(np.float32)
+        user_ids = np.load(ids_path).astype(np.int32)
+
+        user_idx = None
+        for i, uid in enumerate(user_ids):
+            if int(uid) == int(user_id):
+                user_idx = i
+                break
+        if user_idx is None:
+            return {"status": "skipped", "reason": f"用户 {user_id} 不在画像库中", "user_id": user_id}
+
+        current_emb = user_embeddings[user_idx].astype(np.float32)
+        movie_emb = np.asarray(movie_embedding, dtype=np.float32)
+        movie_norm = float(np.linalg.norm(movie_emb))
+        if movie_norm > 0:
+            movie_emb = movie_emb / movie_norm
+
+        if feedback == "like":
+            new_emb = (1.0 - alpha) * current_emb + alpha * movie_emb
+        elif feedback == "dislike":
+            new_emb = current_emb - alpha * movie_emb
+        else:
+            return {"status": "skipped", "reason": f"未知反馈类型: {feedback}", "user_id": user_id}
+
+        new_norm = float(np.linalg.norm(new_emb))
+        if new_norm > 0:
+            new_emb = new_emb / new_norm
+        new_emb = new_emb.astype(np.float32)
+
+        user_embeddings[user_idx] = new_emb
+        np.save(embeddings_path, user_embeddings)
+
+        dim = user_embeddings.shape[1]
+        new_index = faiss.IndexFlatIP(dim)
+        new_index.add(user_embeddings.astype(np.float32))
+        faiss.write_index(new_index, str(output_dir / "user_index.faiss"))
+
+        return {
+            "status": "ok",
+            "reason": f"用户 {user_id} 画像已根据反馈微调",
+            "user_id": user_id,
+            "shift": float(np.linalg.norm(new_emb - current_emb)),
+        }
+
+    @staticmethod
     def load_profile_index(output_dir: str | Path) -> Dict[int, Dict[str, Any]]:
         profile_path = Path(output_dir) / "user_profiles.jsonl"
         if not profile_path.exists():

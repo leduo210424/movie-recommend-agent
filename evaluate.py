@@ -315,14 +315,14 @@ def main():
 
     # ——— Agent (ReAct + Qwen) ———
     import os
-    from src.react_agent import ReActAgent, QwenLLM
+    from src.react_agent import ReActAgent, DeepSeekLLM
 
-    api_key = os.getenv("DASHSCOPE_API_KEY", "")
+    api_key = os.getenv("DEEPSEEK_API_KEY", "")
     if not api_key:
-        print("ERROR: DASHSCOPE_API_KEY not set. Required for QwenLLM.")
+        print("ERROR: DEEPSEEK_API_KEY not set. Required for DeepSeekLLM.")
         return
-    model = os.getenv("QWEN_MODEL", "qwen3-max")
-    print(f"ReAct Agent: QwenLLM model={model}")
+    model = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
+    print(f"ReAct Agent: DeepSeekLLM model={model}")
 
     class AgentEvaluator:
         def __init__(self, inner, query, train_ratings):
@@ -340,7 +340,7 @@ def main():
                 return [rec.get("movie_id") for rec in recs if rec.get("movie_id")]
             return recs
 
-    llm = QwenLLM(api_key=api_key, model=model)
+    llm = DeepSeekLLM(api_key=api_key, model=model)
     react_agent = ReActAgent(llm=llm)
     agent_eval = AgentEvaluator(react_agent, args.query, train_ratings)
 
