@@ -23,6 +23,7 @@ if ROOT not in sys.path:
 from src.react_agent import DeepSeekLLM, ReActAgent
 from src.user_memory import UserMemoryStore
 from src.basic_recommender import BasicRecommender
+from src.chroma_store import ChromaMovieStore
 
 logger = logging.getLogger(__name__)
 
@@ -43,11 +44,31 @@ class FeedbackRequest(BaseModel):
     session_id: str = "default"
 
 
+class MovieCreateRequest(BaseModel):
+    """新增电影请求"""
+    title: str
+    genres: List[str] = []
+    release_year: Optional[float] = None
+    overview_en: str = ""
+    movie_id: Optional[int] = None  # 可选，自动分配
+
+
+class MovieUpdateRequest(BaseModel):
+    """更新电影请求 (所有字段可选, 只更新传入的)"""
+    title: Optional[str] = None
+    genres: Optional[List[str]] = None
+    release_year: Optional[float] = None
+    overview_en: Optional[str] = None
+    avg_rating: Optional[float] = None
+    rating_count: Optional[int] = None
+
+
 app = FastAPI(title="Movie Recommend Agent API", version="0.4")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 app.mount("/static", StaticFiles(directory=str(Path(ROOT) / "static")), name="static")
 
 _react_agent: Optional[ReActAgent] = None
+_chroma_store: Optional[ChromaMovieStore] = None
 
 
 def _get_agent() -> ReActAgent:
@@ -64,6 +85,22 @@ def _get_agent() -> ReActAgent:
         llm = DeepSeekLLM(api_key=api_key, model=model, base_url=base_url)
         _react_agent = ReActAgent(llm=llm)
     return _react_agent
+
+
+def _get_chroma_store() -> ChromaMovieStore:
+    """获取 ChromaDB 存储单例 (延迟初始化)"""
+    global _chroma_store
+    if _chroma_store is None:
+        chroma_dir = os.path.join(ROOT, "data", "chroma")
+        model_name = os.getenv(
+            "EMBEDDING_MODEL",
+            "sentence-transformers/all-MiniLM-L6-v2",
+        )
+        _chroma_store = ChromaMovieStore(
+            persist_dir=chroma_dir,
+            model_name=model_name,
+        )
+    return _chroma_store
 
 
 @app.get("/health")
@@ -176,6 +213,111 @@ def reset_session(session_id: str = "default"):
     # Harness L3: 重置工具调用计数
     agent.tool_guard.reset_session(session_id)
     return {"status": "ok", "message": f"Session '{session_id}' 已重置"}
+
+
+# ═══════════════════════════════════════════════════════════════
+# 电影 CRUD API (ChromaDB 后端)
+# ═══════════════════════════════════════════════════════════════
+
+@app.get("/movies")
+def list_movies(
+    offset: int = 0,
+    limit: int = 50,
+    genre: Optional[str] = None,
+    min_year: Optional[int] = None,
+):
+    """分页列出电影，支持按类型/年份过滤。"""
+    store = _get_chroma_store()
+    records = store.list_movies(
+        offset=offset, limit=limit,
+        genre=genre, min_year=min_year,
+    )
+    return {
+        "total": store.count(),
+        "offset": offset,
+        "limit": limit,
+        "results": [r.to_dict() for r in records],
+    }
+
+
+@app.get("/movies/stats")
+def movie_stats():
+    """电影存储统计信息"""
+    store = _get_chroma_store()
+    return store.stats()
+
+
+@app.get("/movies/{movie_id}")
+def get_movie(movie_id: int):
+    """获取单部电影"""
+    store = _get_chroma_store()
+    movie = store.get_movie(movie_id)
+    if movie is None:
+        raise HTTPException(status_code=404, detail=f"电影 {movie_id} 不存在")
+    return movie.to_dict()
+
+
+@app.post("/movies")
+def create_movie(payload: MovieCreateRequest):
+    """新增电影 (自动编码 embedding 并写入 ChromaDB)"""
+    store = _get_chroma_store()
+    movie_dict = {
+        "title": payload.title,
+        "genres": payload.genres,
+        "release_year": payload.release_year,
+        "overview_en": payload.overview_en,
+    }
+    if payload.movie_id is not None:
+        movie_dict["movie_id"] = payload.movie_id
+
+    try:
+        movie_id = store.add_movie(movie_dict)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"新增电影失败: {e}")
+
+    return {"status": "ok", "movie_id": movie_id, "message": f"电影 '{payload.title}' 已新增"}
+
+
+@app.put("/movies/{movie_id}")
+def update_movie(movie_id: int, payload: MovieUpdateRequest):
+    """更新电影 (部分更新: 只修改传入的字段)"""
+    store = _get_chroma_store()
+
+    # 只传非 None 字段
+    fields = {k: v for k, v in payload.model_dump().items() if v is not None}
+    if not fields:
+        raise HTTPException(status_code=400, detail="至少需要提供一个要更新的字段")
+
+    ok = store.update_movie(movie_id, **fields)
+    if not ok:
+        raise HTTPException(status_code=404, detail=f"电影 {movie_id} 不存在")
+    return {"status": "ok", "movie_id": movie_id, "updated_fields": list(fields.keys())}
+
+
+@app.delete("/movies/{movie_id}")
+def delete_movie(movie_id: int):
+    """删除电影 (从三个 ChromaDB collection 中移除)"""
+    store = _get_chroma_store()
+    ok = store.delete_movie(movie_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail=f"电影 {movie_id} 不存在")
+    return {"status": "ok", "movie_id": movie_id, "message": f"电影 {movie_id} 已删除"}
+
+
+@app.post("/movies/search")
+def search_movies(
+    query: str = "",
+    top_k: int = 10,
+    genre: Optional[str] = None,
+):
+    """纯语义搜索 (不依赖用户画像): 多粒度融合检索"""
+    store = _get_chroma_store()
+    results = store.search(
+        query_text=query,
+        top_k=top_k,
+        genre_filter=genre,
+    )
+    return {"query": query, "top_k": top_k, "results": results}
 
 
 # ── WebSocket 流式推荐 ──

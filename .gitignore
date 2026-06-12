@@ -40,6 +40,11 @@ debug_*.py
 # Logs
 *.log
 
+# ChromaDB persisted data (large binary)
+data/chroma/
+data/chroma_fresh/
+
 # Temporary files
 test_write.txt
 =1.0.0
+=0.4.0

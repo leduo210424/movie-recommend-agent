@@ -11,6 +11,8 @@ import numpy as np
 import faiss
 from sentence_transformers import SentenceTransformer
 
+from src.chroma_store import ChromaMovieStore
+
 
 DEFAULT_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 USER_SIM_WEIGHT = 0.25
@@ -130,33 +132,92 @@ class BasicRecommender:
         plot_index_file: str | Path = "data/processed/movie_plot_index.faiss",
         attr_index_file: str | Path = "data/processed/movie_attr_index.faiss",
         model_name: Optional[str] = None,
+        chroma_store: Optional[ChromaMovieStore] = None,
     ) -> None:
+
+        # ── ChromaDB 后端 (新) ──
+        self.chroma_store = chroma_store
+
+        # ── 元数据层 (FAISS 和 ChromaDB 共享) ──
         self.movie_records = load_json_records(movie_file)
         if not self.movie_records:
             raise ValueError(f"No movie metadata found in {movie_file}")
 
         self.movie_stats = load_movie_stats(full_data_file)
-        self.movie_embeddings = np.load(movie_embeddings_file).astype(np.float32)
-        self.movie_ids = np.load(movie_ids_file).astype(np.int32)
-        if len(self.movie_records) != len(self.movie_embeddings) or len(self.movie_ids) != len(self.movie_embeddings):
-            raise ValueError("Movie metadata, ids, and embeddings must have the same length.")
-
         self.movie_lookup: Dict[int, MovieCandidate] = {}
         self.movie_order: List[int] = []
-        for record, embedding, movie_id in zip(self.movie_records, self.movie_embeddings, self.movie_ids):
-            movie_id_int = int(movie_id)
-            stats = self.movie_stats.get(movie_id_int, {"avg_rating": 0.0, "rating_count": 0.0})
-            candidate = MovieCandidate(
-                movie_id=movie_id_int,
-                title=str(record.get("title", "")),
-                genres=self._normalize_genres(record.get("genres")),
-                release_year=self._to_float_or_none(record.get("release_year")),
-                avg_rating=float(stats["avg_rating"]),
-                rating_count=int(stats["rating_count"]),
-                embedding=np.asarray(embedding, dtype=np.float32),
+
+        if chroma_store is not None:
+            # ChromaDB 模式: 从 ChromaDB 构建 movie_lookup (不含 embedding)
+            for record in self.movie_records:
+                movie_id_int = int(record["movie_id"])
+                stats = self.movie_stats.get(movie_id_int, {"avg_rating": 0.0, "rating_count": 0.0})
+                candidate = MovieCandidate(
+                    movie_id=movie_id_int,
+                    title=str(record.get("title", "")),
+                    genres=self._normalize_genres(record.get("genres")),
+                    release_year=self._to_float_or_none(record.get("release_year")),
+                    avg_rating=float(stats["avg_rating"]),
+                    rating_count=int(stats["rating_count"]),
+                    embedding=np.zeros(384, dtype=np.float32),  # dummy, embedding 查询走 ChromaDB
+                )
+                self.movie_lookup[movie_id_int] = candidate
+                self.movie_order.append(movie_id_int)
+
+            # 加载文本模型 (用于 query/profile 编码, 不做电影编码)
+            if model_name is not None:
+                self.model_name = model_name
+            else:
+                self.model_name = chroma_store._model_name
+            self.text_model = SentenceTransformer(self.model_name)
+
+            # FAISS 索引全部跳过
+            self.use_multi_index = True  # ChromaDB 自带多粒度融合
+            self.movie_embeddings = np.zeros((1, 384), dtype=np.float32)
+            self.movie_ids = np.array([], dtype=np.int32)
+            self.all_movie_embeddings = self.movie_embeddings
+            self.all_movie_embeddings_norm = self.movie_embeddings
+            self.plot_index = None
+            self.attr_index = None
+            self.movie_index_meta = {}
+
+        else:
+            # FAISS 模式 (原逻辑, 保持不变)
+            self.movie_embeddings = np.load(movie_embeddings_file).astype(np.float32)
+            self.movie_ids = np.load(movie_ids_file).astype(np.int32)
+            if len(self.movie_records) != len(self.movie_embeddings) or len(self.movie_ids) != len(self.movie_embeddings):
+                raise ValueError("Movie metadata, ids, and embeddings must have the same length.")
+
+            for record, embedding, movie_id in zip(self.movie_records, self.movie_embeddings, self.movie_ids):
+                movie_id_int = int(movie_id)
+                stats = self.movie_stats.get(movie_id_int, {"avg_rating": 0.0, "rating_count": 0.0})
+                candidate = MovieCandidate(
+                    movie_id=movie_id_int,
+                    title=str(record.get("title", "")),
+                    genres=self._normalize_genres(record.get("genres")),
+                    release_year=self._to_float_or_none(record.get("release_year")),
+                    avg_rating=float(stats["avg_rating"]),
+                    rating_count=int(stats["rating_count"]),
+                    embedding=np.asarray(embedding, dtype=np.float32),
+                )
+                self.movie_lookup[movie_id_int] = candidate
+                self.movie_order.append(movie_id_int)
+
+            self.movie_index_meta = self._load_json(movie_index_meta_file)
+            self.model_name = model_name or str(self.movie_index_meta.get("model", DEFAULT_MODEL))
+            self.text_model = SentenceTransformer(self.model_name)
+
+            self.all_movie_embeddings = self.movie_embeddings.astype(np.float32)
+            self.all_movie_embeddings_norm = self.all_movie_embeddings / np.clip(
+                np.linalg.norm(self.all_movie_embeddings, axis=1, keepdims=True),
+                1e-12,
+                None,
             )
-            self.movie_lookup[movie_id_int] = candidate
-            self.movie_order.append(movie_id_int)
+
+            # 多粒度索引
+            self.plot_index = self._load_faiss_index(plot_index_file)
+            self.attr_index = self._load_faiss_index(attr_index_file)
+            self.use_multi_index = self.plot_index is not None and self.attr_index is not None
 
         # Bayesian 平滑热度：避免评分人数少的冷门片 pop=1.0 挤占真正热门电影
         all_ratings = [c.avg_rating for c in self.movie_lookup.values() if c.rating_count > 0]
@@ -176,22 +237,6 @@ class BasicRecommender:
             int(user_id): np.asarray(embedding, dtype=np.float32)
             for user_id, embedding in zip(self.user_ids, self.user_embeddings)
         }
-
-        self.movie_index_meta = self._load_json(movie_index_meta_file)
-        self.model_name = model_name or str(self.movie_index_meta.get("model", DEFAULT_MODEL))
-        self.text_model = SentenceTransformer(self.model_name)
-
-        self.all_movie_embeddings = self.movie_embeddings.astype(np.float32)
-        self.all_movie_embeddings_norm = self.all_movie_embeddings / np.clip(
-            np.linalg.norm(self.all_movie_embeddings, axis=1, keepdims=True),
-            1e-12,
-            None,
-        )
-
-        # 多粒度索引：剧情语义(plot) + 属性标签(attr) + 综合(full)
-        self.plot_index = self._load_faiss_index(plot_index_file)
-        self.attr_index = self._load_faiss_index(attr_index_file)
-        self.use_multi_index = self.plot_index is not None and self.attr_index is not None
 
     @staticmethod
     def _load_json(path: str | Path) -> Dict[str, Any]:
@@ -328,6 +373,17 @@ class BasicRecommender:
         weights: (full_index_weight, plot_index_weight, attr_index_weight)
         Returns: merged movie_ids 列表，按融合分数降序排列
         """
+        # ── ChromaDB 后端 ──
+        if self.chroma_store is not None:
+            results = self.chroma_store.search(
+                query_text="",           # 有预计算向量时不需文本
+                query_embedding=query_embedding,
+                top_k=top_k,
+                weights=weights,
+            )
+            return [r["movie_id"] for r in results]
+
+        # ── FAISS 后端 (原逻辑) ──
         q = query_embedding.reshape(1, -1).astype(np.float32)
         candidates: Dict[int, float] = {}
 
@@ -671,6 +727,41 @@ class BasicRecommender:
             normalize_embeddings=True,
         )[0].astype(np.float32)
 
+        # ── ChromaDB 后端 ──
+        if self.chroma_store is not None:
+            chroma_results = self.chroma_store.search(
+                query_text=description,
+                query_embedding=desc_embedding,
+                top_k=max(top_k * 2, top_k),
+            )
+            results: List[RecommendationResult] = []
+            for r in chroma_results:
+                mid = r["movie_id"]
+                if mid in skip:
+                    continue
+                movie = self.movie_lookup.get(mid)
+                if movie is None:
+                    continue
+                rag_sim = r.get("fusion_score", 0.0)
+                popularity = normalize_to_unit(self._bayesian_pop.get(mid, movie.avg_rating), 1.0, 5.0)
+                score = 0.6 * rag_sim + 0.4 * popularity
+                results.append(RecommendationResult(
+                    movie_id=movie.movie_id,
+                    title=movie.title,
+                    genres=movie.genres,
+                    release_year=movie.release_year,
+                    user_sim=0.0,
+                    rag_sim=rag_sim,
+                    popularity=popularity,
+                    score=score,
+                    reasons=[f"语义匹配: {description[:60]}"],
+                ))
+                if len(results) >= top_k:
+                    break
+            results.sort(key=lambda r: r.score, reverse=True)
+            return results[:top_k]
+
+        # ── FAISS 后端 (原逻辑) ──
         scores = self.all_movie_embeddings_norm @ desc_embedding
         top_indices = np.argsort(-scores)[: max(top_k * 2, top_k)]
 
