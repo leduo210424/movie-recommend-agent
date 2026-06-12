@@ -71,6 +71,33 @@ def health():
     return {"status": "ok"}
 
 
+@app.get("/harness/status")
+def harness_status():
+    """Harness 工程层状态：暴露断路器、降级器、工具调用统计。"""
+    try:
+        agent = _get_agent()
+    except HTTPException:
+        return {"status": "agent_not_initialized"}
+
+    return {
+        "status": "ok",
+        "circuit_breaker": agent.llm_circuit_breaker.stats,
+        "degrader": agent.degrader.stats,
+        "tool_calls": {
+            sid: agent.tool_guard.get_stats(sid)
+            for sid in agent.sessions
+        } if agent.sessions else {},
+    }
+
+
+@app.post("/harness/circuit-breaker/reset")
+def reset_circuit_breaker():
+    """手动重置 LLM 断路器 (运维接口)。"""
+    agent = _get_agent()
+    agent.llm_circuit_breaker.reset()
+    return {"status": "ok", "message": "断路器已手动重置为 CLOSED"}
+
+
 @app.get("/")
 def home():
     return FileResponse(str(Path(ROOT) / "static" / "index.html"))
@@ -146,6 +173,8 @@ def reset_session(session_id: str = "default"):
     agent = _get_agent()
     if session_id in agent.sessions:
         del agent.sessions[session_id]
+    # Harness L3: 重置工具调用计数
+    agent.tool_guard.reset_session(session_id)
     return {"status": "ok", "message": f"Session '{session_id}' 已重置"}
 
 

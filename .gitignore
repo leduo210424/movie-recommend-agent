@@ -36,3 +36,10 @@ Thumbs.db
 output.json
 result_post*.json
 debug_*.py
+
+# Logs
+*.log
+
+# Temporary files
+test_write.txt
+=1.0.0
