@@ -10,7 +10,7 @@ import logging
 from pathlib import Path
 from typing import Optional, List
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -216,7 +216,7 @@ def reset_session(session_id: str = "default"):
 
 
 # ═══════════════════════════════════════════════════════════════
-# 电影 CRUD API (ChromaDB 后端)
+# 电影查询 API (公开, 只读)
 # ═══════════════════════════════════════════════════════════════
 
 @app.get("/movies")
@@ -273,9 +273,33 @@ def get_movie(movie_id: int):
     return movie.to_dict()
 
 
-@app.post("/movies")
-def create_movie(payload: MovieCreateRequest):
-    """新增电影 (自动编码 embedding 并写入 ChromaDB)"""
+# ═══════════════════════════════════════════════════════════════
+# 管理员 API (需要 ADMIN_API_KEY 鉴权)
+# ═══════════════════════════════════════════════════════════════
+
+def _verify_admin(x_admin_key: str = Header(..., alias="X-Admin-Key")) -> None:
+    """管理员鉴权依赖: 从 HTTP Header 读取 X-Admin-Key 并校验。
+
+    用法: 在端点参数中声明 `_admin: None = Depends(_verify_admin)` 即可。
+    前端调用时需要加 Header: X-Admin-Key: <your-secret>
+    """
+    expected = os.getenv("ADMIN_API_KEY", "")
+    if not expected:
+        # 未配置 ADMIN_API_KEY 时拒绝所有管理操作 (fail-secure)
+        raise HTTPException(
+            status_code=501,
+            detail="管理员功能未启用 (ADMIN_API_KEY 未配置)",
+        )
+    if x_admin_key != expected:
+        raise HTTPException(
+            status_code=401,
+            detail="管理员密钥无效",
+        )
+
+
+@app.post("/admin/movies")
+def admin_create_movie(payload: MovieCreateRequest, _admin: None = Depends(_verify_admin)):
+    """[管理员] 新增电影 (自动编码 embedding 并写入 ChromaDB)"""
     store = _get_chroma_store()
     movie_dict = {
         "title": payload.title,
@@ -294,12 +318,11 @@ def create_movie(payload: MovieCreateRequest):
     return {"status": "ok", "movie_id": movie_id, "message": f"电影 '{payload.title}' 已新增"}
 
 
-@app.put("/movies/{movie_id}")
-def update_movie(movie_id: int, payload: MovieUpdateRequest):
-    """更新电影 (部分更新: 只修改传入的字段)"""
+@app.put("/admin/movies/{movie_id}")
+def admin_update_movie(movie_id: int, payload: MovieUpdateRequest, _admin: None = Depends(_verify_admin)):
+    """[管理员] 更新电影 (部分更新: 只修改传入的字段)"""
     store = _get_chroma_store()
 
-    # 只传非 None 字段
     fields = {k: v for k, v in payload.model_dump().items() if v is not None}
     if not fields:
         raise HTTPException(status_code=400, detail="至少需要提供一个要更新的字段")
@@ -310,9 +333,9 @@ def update_movie(movie_id: int, payload: MovieUpdateRequest):
     return {"status": "ok", "movie_id": movie_id, "updated_fields": list(fields.keys())}
 
 
-@app.delete("/movies/{movie_id}")
-def delete_movie(movie_id: int):
-    """删除电影 (从三个 ChromaDB collection 中移除)"""
+@app.delete("/admin/movies/{movie_id}")
+def admin_delete_movie(movie_id: int, _admin: None = Depends(_verify_admin)):
+    """[管理员] 删除电影 (从三个 ChromaDB collection 中移除)"""
     store = _get_chroma_store()
     ok = store.delete_movie(movie_id)
     if not ok:
