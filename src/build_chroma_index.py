@@ -1,24 +1,27 @@
 """
-一次性迁移脚本: 将 FAISS + JSON + numpy 的电影数据导入 ChromaDB。
+构建 ChromaDB 向量索引: 从 movies.json 重新编码 → 写入 ChromaDB。
+
+与 rag_build_index.py (FAISS 版) 对应, 这个是 ChromaDB 版。
+不依赖 .faiss / .npy 文件, 直接用 SentenceTransformer 重新编码原始电影数据。
 
 用法:
-    # 从现有文件迁移 (使用 metadata 中记录的模型)
-    python src/migrate_faiss_to_chroma.py
+    # 全量构建
+    python src/build_chroma_index.py
 
     # 指定模型和数据路径
-    python src/migrate_faiss_to_chroma.py \
+    python src/build_chroma_index.py \
         --movies data/processed/movies.json \
         --model sentence-transformers/all-MiniLM-L6-v2 \
         --chroma-dir data/chroma
 
-    # 采样验证 (只迁移前 20 部)
-    python src/migrate_faiss_to_chroma.py --sample 20
+    # 采样验证 (只构建前 20 部)
+    python src/build_chroma_index.py --sample 20
 
-迁移策略:
+构建策略:
     - 读取 movies.json 获取元数据 (title, genres, release_year, overview_en)
-    - 用 SentenceTransformer 重新编码 (不使用 .npy 文件, 确保语义空间一致)
+    - 用 SentenceTransformer 重新编码 (不依赖 .npy / .faiss, 确保语义空间一致)
     - 批量写入 ChromaDB 的三个 collection
-    - 迁移后输出统计信息, 对比 FAISS 和 ChromaDB 的检索结果一致性
+    - 构建后输出统计信息 + 检索验证
 """
 
 from __future__ import annotations
@@ -92,7 +95,7 @@ def load_movie_stats(full_data_path: Path) -> Dict[int, Dict[str, float]]:
     return stats
 
 
-def migrate(
+def build_index(
     movies_path: Path,
     full_data_path: Path,
     chroma_dir: Path,
@@ -100,15 +103,15 @@ def migrate(
     sample: int = 0,
     batch_size: int = 50,
 ) -> ChromaMovieStore:
-    """执行迁移: movies.json → ChromaDB。
+    """构建 ChromaDB 索引: movies.json → ChromaDB (三 Collection 多粒度架构)。
 
     Args:
         movies_path: movies.json 路径
         full_data_path: full_data.json 路径 (评分统计)
         chroma_dir: ChromaDB 持久化目录
         model_name: SentenceTransformer 模型名
-        sample: 仅迁移前 N 部 (用于测试)
-        batch_size: 每批迁移数量
+        sample: 仅构建前 N 部 (用于测试)
+        batch_size: 每批构建数量
 
     Returns:
         ChromaMovieStore 实例 (已填充数据)
@@ -143,7 +146,7 @@ def migrate(
             movie["avg_rating"] = 0.0
             movie["rating_count"] = 0
 
-    # 批量迁移
+    # 批量构建
     imported = 0
     errors = 0
 
@@ -158,7 +161,7 @@ def migrate(
                 imported += 1
             except Exception as e:
                 errors += 1
-                logger.error("迁移失败 movie_id=%s: %s", movie.get("movie_id"), e)
+                logger.error("构建失败 movie_id=%s: %s", movie.get("movie_id"), e)
                 if errors <= 5:
                     import traceback
                     traceback.print_exc()
@@ -173,13 +176,13 @@ def migrate(
 
     # 验证
     print("=" * 60)
-    print("  迁移完成 — 验证")
+    print("  构建完成 — 验证")
     print("=" * 60)
     store_stats = store.stats()
     print(f"  ChromaDB 电影总数: {store_stats['movie_count']}")
     print(f"  期望总数:          {total}")
-    print(f"  迁移成功:          {imported}")
-    print(f"  迁移失败:          {errors}")
+    print(f"  构建成功:          {imported}")
+    print(f"  构建失败:          {errors}")
 
     if store_stats['movie_count'] != total:
         print(f"  ⚠ 数量不一致! 差值={total - store_stats['movie_count']}")
@@ -200,7 +203,7 @@ def migrate(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Migrate movie data from FAISS/JSON to ChromaDB"
+        description="Build ChromaDB vector index from movies.json"
     )
     parser.add_argument(
         "--movies",
@@ -226,7 +229,7 @@ def main() -> None:
         "--sample",
         type=int,
         default=0,
-        help="Only migrate first N movies (for testing)",
+        help="Only build first N movies (for testing)",
     )
     parser.add_argument(
         "--batch-size",
@@ -241,7 +244,7 @@ def main() -> None:
         format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
     )
 
-    migrate(
+    build_index(
         movies_path=Path(args.movies),
         full_data_path=Path(args.full_data),
         chroma_dir=Path(args.chroma_dir),
