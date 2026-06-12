@@ -254,6 +254,8 @@ def main():
     parser.add_argument("--sample-users", type=int, default=0,
                         help="Randomly sample N users for evaluation (0 = all users)")
     parser.add_argument("--data-dir", default="data/processed", help="Path to processed data")
+    parser.add_argument("--chroma", action="store_true",
+                        help="Use ChromaDB backend instead of FAISS")
     args = parser.parse_args()
 
     top_k_values = [5, 10, 20]
@@ -332,7 +334,11 @@ def main():
 
         def recommend(self, user_id, top_k):
             exclude = set(self.train_ratings.get(user_id, []))
-            result = self.inner.invoke(user_id=user_id, query=self.query, top_k=top_k, exclude_ids=exclude)
+            result = self.inner.invoke(
+                user_id=user_id, query=self.query, top_k=top_k,
+                exclude_ids=exclude,
+                session_id=f"eval_user_{user_id}",  # 每个用户独立 session
+            )
             recs = result.get("results", [])
             if not recs:
                 return []
@@ -341,11 +347,23 @@ def main():
             return recs
 
     llm = DeepSeekLLM(api_key=api_key, model=model)
-    react_agent = ReActAgent(llm=llm)
+
+    # ── 向量后端选择 ──
+    if args.chroma:
+        from src.chroma_store import ChromaMovieStore
+        from src.basic_recommender import BasicRecommender
+        chroma_store = ChromaMovieStore(persist_dir="data/chroma")
+        recommender = BasicRecommender(chroma_store=chroma_store)
+        backend_label = "ChromaDB"
+    else:
+        recommender = None   # ReActAgent 内部默认 FAISS
+        backend_label = "FAISS"
+
+    react_agent = ReActAgent(llm=llm, recommender=recommender)
     agent_eval = AgentEvaluator(react_agent, args.query, train_ratings)
 
     query_label = f'"{args.query}"' if args.query else "(empty)"
-    print(f"\nEvaluating ReAct Agent (query={query_label})...")
+    print(f"\nEvaluating ReAct Agent (query={query_label}, backend={backend_label})...")
     agent_metrics = evaluate(agent_eval, test_holdout, train_ratings, top_k_values, label="Agent")
     print(f"  Users evaluated: {agent_metrics['Agent_users_evaluated']}"
           f" / {agent_metrics['Agent_users_total']}")

@@ -91,7 +91,7 @@ class ToolGuard:
     # ── 每个工具的策略定义 ──
     DEFAULT_POLICIES: Dict[str, ToolPolicy] = {
         "get_user_profile": ToolPolicy(
-            max_calls_per_session=3,
+            max_calls_per_session=1,  # 一次查询即可获取完整画像，多余说明 LLM 在乱来
             require_user_context=True,
         ),
         "search_cold_start": ToolPolicy(
