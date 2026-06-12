@@ -247,6 +247,22 @@ def movie_stats():
     return store.stats()
 
 
+@app.get("/movies/search")
+def search_movies(
+    query: str = "",
+    top_k: int = 10,
+    genre: Optional[str] = None,
+):
+    """纯语义搜索 (不依赖用户画像): 多粒度融合检索"""
+    store = _get_chroma_store()
+    results = store.search(
+        query_text=query,
+        top_k=top_k,
+        genre_filter=genre,
+    )
+    return {"query": query, "top_k": top_k, "results": results}
+
+
 @app.get("/movies/{movie_id}")
 def get_movie(movie_id: int):
     """获取单部电影"""
@@ -302,22 +318,6 @@ def delete_movie(movie_id: int):
     if not ok:
         raise HTTPException(status_code=404, detail=f"电影 {movie_id} 不存在")
     return {"status": "ok", "movie_id": movie_id, "message": f"电影 {movie_id} 已删除"}
-
-
-@app.post("/movies/search")
-def search_movies(
-    query: str = "",
-    top_k: int = 10,
-    genre: Optional[str] = None,
-):
-    """纯语义搜索 (不依赖用户画像): 多粒度融合检索"""
-    store = _get_chroma_store()
-    results = store.search(
-        query_text=query,
-        top_k=top_k,
-        genre_filter=genre,
-    )
-    return {"query": query, "top_k": top_k, "results": results}
 
 
 # ── WebSocket 流式推荐 ──
