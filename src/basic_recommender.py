@@ -649,38 +649,118 @@ class BasicRecommender:
         
         return results
     
+    # ── 情绪词映射 (中英双语 + 复合词拆分) ──
+    _MOOD_TO_GENRES = {
+        # 英文
+        "relaxing":  ["Comedy", "Animation", "Children's", "Documentary"],
+        "exciting":  ["Action", "Adventure", "Thriller", "Sci-Fi"],
+        "thrilling": ["Thriller", "Horror", "Mystery", "Crime"],
+        "romantic":  ["Romance", "Drama"],
+        "sad":       ["Drama"],
+        "funny":     ["Comedy"],
+        "dark":      ["Horror", "Crime", "Thriller", "Drama"],
+        "light":     ["Comedy", "Animation", "Children's", "Musical"],
+        "thought-provoking": ["Drama", "Documentary", "Sci-Fi", "Mystery"],
+        "action-packed":     ["Action", "Adventure", "Sci-Fi", "Thriller"],
+        "adventure":         ["Adventure", "Action", "Fantasy", "Sci-Fi"],
+        "fantasy":           ["Fantasy", "Adventure", "Animation"],
+        "sci-fi":            ["Sci-Fi", "Adventure"],
+        "horror":            ["Horror", "Thriller", "Mystery"],
+        "crime":             ["Crime", "Thriller", "Mystery", "Drama"],
+        "war":               ["War", "Action", "Drama"],
+        "western":           ["Western", "Action", "Adventure"],
+        # 中文情绪词 → 映射到英文 key 间接使用
+        "轻松":   ["Comedy", "Animation", "Children's"],
+        "搞笑":   ["Comedy"],
+        "紧张":   ["Thriller", "Action"],
+        "治愈":   ["Drama", "Animation", "Children's"],
+        "烧脑":   ["Mystery", "Sci-Fi", "Thriller"],
+        "压抑":   ["Drama", "Horror"],
+        "刺激":   ["Action", "Thriller", "Adventure"],
+        "温暖":   ["Drama", "Comedy", "Animation"],
+        "悲伤":   ["Drama"],
+        "欢乐":   ["Comedy", "Animation", "Musical"],
+        "热血":   ["Action", "Adventure", "Sci-Fi"],
+        "恐怖":   ["Horror", "Thriller"],
+        "悬疑":   ["Mystery", "Thriller"],
+        "浪漫":   ["Romance", "Drama"],
+        "科幻":   ["Sci-Fi", "Adventure"],
+    }
+
+    # ── 中文情绪词 → 英文编码短语（避免英文模型编码中文的噪声）──
+    _MOOD_TO_ENGLISH = {
+        "轻松": "lighthearted relaxing feel-good",
+        "搞笑": "funny comedy humorous laugh",
+        "紧张": "tense suspenseful thrilling",
+        "治愈": "healing heartwarming comfort wholesome",
+        "烧脑": "mind-bending cerebral complex puzzle",
+        "压抑": "oppressive dark bleak depressing",
+        "刺激": "exciting adrenaline thrilling intense",
+        "温暖": "warm heartwarming feel-good cozy",
+        "悲伤": "sad tragic emotional tearjerker",
+        "欢乐": "joyful happy cheerful fun celebration",
+        "热血": "inspiring passionate epic motivational",
+        "恐怖": "horror scary terrifying frightening",
+        "悬疑": "mystery suspense thriller whodunit",
+        "浪漫": "romantic love story heartwarming",
+        "科幻": "science fiction futuristic space technology",
+    }
+
+    @classmethod
+    def _split_compound_mood(cls, mood: str) -> List[str]:
+        """拆分复合情绪词: '轻松搞笑' → ['轻松', '搞笑']"""
+        # 按已知中文情绪词做贪心匹配拆分
+        known = sorted(cls._MOOD_TO_GENRES.keys(), key=len, reverse=True)
+        remaining = mood.strip()
+        parts = []
+        while remaining:
+            matched = False
+            for kw in known:
+                if remaining.startswith(kw):
+                    parts.append(kw)
+                    remaining = remaining[len(kw):]
+                    matched = True
+                    break
+            if not matched:
+                # 跳过未识别的字符
+                remaining = remaining[1:]
+        return parts
+
     def recommend_by_mood(self, mood: str, top_k: int = 5) -> List[RecommendationResult]:
         """
         Recommend movies by mood/atmosphere.
-        Maps moods to genres and uses semantic search.
+        支持中英双语情绪词 + 复合词拆分 + 中文→英文翻译编码。
         """
-        # Mood to genre mapping
-        mood_to_genres = {
-            "relaxing": ["Comedy", "Animation", "Children's", "Documentary"],
-            "exciting": ["Action", "Adventure", "Thriller", "Sci-Fi"],
-            "thrilling": ["Thriller", "Horror", "Mystery", "Crime"],
-            "romantic": ["Romance", "Drama"],
-            "sad": ["Drama"],
-            "funny": ["Comedy"],
-            "dark": ["Horror", "Crime", "Thriller", "Drama"],
-            "light": ["Comedy", "Animation", "Children's", "Musical"],
-            "thought-provoking": ["Drama", "Documentary", "Sci-Fi", "Mystery"],
-            "action-packed": ["Action", "Adventure", "Sci-Fi", "Thriller"],
-            "adventure": ["Adventure", "Action", "Fantasy", "Sci-Fi"],
-            "fantasy": ["Fantasy", "Adventure", "Animation"],
-            "sci-fi": ["Sci-Fi", "Adventure"],
-            "horror": ["Horror", "Thriller", "Mystery"],
-            "crime": ["Crime", "Thriller", "Mystery", "Drama"],
-            "war": ["War", "Action", "Drama"],
-            "western": ["Western", "Action", "Adventure"]
-        }
-        
-        mood_lower = mood.lower()
-        target_genres = mood_to_genres.get(mood_lower, [])
-        
-        # Encode mood as semantic query
+        mood_clean = mood.strip()
+
+        # 1. 拆分复合情绪词
+        parts = self._split_compound_mood(mood_clean)
+        if not parts:
+            parts = [mood_clean]
+
+        # 2. 合并所有匹配的类型
+        target_genres = []
+        for part in parts:
+            genres = self._MOOD_TO_GENRES.get(part, [])
+            if not genres:
+                # 中文查不到试试英文 key (lower)
+                genres = self._MOOD_TO_GENRES.get(part.lower(), [])
+            target_genres.extend(genres)
+        target_genres = list(dict.fromkeys(target_genres))  # 去重保序
+
+        # 3. 翻译为英文短语再编码（英文模型处理中文 = 随机噪声）
+        english_phrases = []
+        for part in parts:
+            eng = self._MOOD_TO_ENGLISH.get(part)
+            if eng:
+                english_phrases.append(eng)
+            else:
+                english_phrases.append(part)  # 未知词保持原样
+        english_query = " ".join(english_phrases)
+
+        # 4. 编码（用英文短语，确保语义空间有效性）
         mood_embedding = self.text_model.encode(
-            [mood],
+            [english_query],
             convert_to_numpy=True,
             normalize_embeddings=True,
         )[0].astype(np.float32)
