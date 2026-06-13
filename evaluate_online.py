@@ -215,13 +215,11 @@ def main():
     if args.all_queries:
         print()
         print(f"  ═══ 锚点校验 ═══")
-        for query_label, vals in results_by_cat.items():
-            for (a_r, p_r, _) in vals:
-                pass  # dummy — check below
-        calib_check = "OK: 模糊查询 Agent≈Popular≈1.0" if all(
-            abs(v[0] - v[1]) < 0.05 for v in results_by_cat.get("模糊查询", [(0, 0)])
-        ) else "CHECK"
-        print(f"  模糊查询校准: {calib_check}")
+        calib_vals = results_by_cat.get("模糊查询", [(0, 0, 0, 0)])
+        avg_a = sum(v[0] for v in calib_vals) / len(calib_vals)
+        avg_p = sum(v[1] for v in calib_vals) / len(calib_vals)
+        calib_check = "OK" if abs(avg_a - avg_p) < 0.1 and avg_a > 0.8 else "CHECK"
+        print(f"  模糊查询校准: {calib_check} (Agent={avg_a:.3f}, Popular={avg_p:.3f}, 期望均≈1.0)")
         print(f"  已知局限: DeepSeek 同时参与推荐与评估, 报告数据仅供内部对比参考")
         print()
 
