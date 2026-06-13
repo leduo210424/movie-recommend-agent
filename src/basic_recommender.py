@@ -15,9 +15,9 @@ from src.chroma_store import ChromaMovieStore
 
 
 DEFAULT_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
-USER_SIM_WEIGHT = 0.25
-RAG_SIM_WEIGHT = 0.25
-POPULARITY_WEIGHT = 0.50
+USER_SIM_WEIGHT = 0.30
+RAG_SIM_WEIGHT = 0.40
+POPULARITY_WEIGHT = 0.30
 DEFAULT_POOL_SIZE = 50
 
 
