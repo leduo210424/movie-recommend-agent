@@ -315,17 +315,18 @@ def main():
     print(f"Backend: {backend_label}")
 
     class AgentEvaluator:
-        def __init__(self, inner, query, train_ratings):
+        def __init__(self, inner, query, train_ratings, query_tag=""):
             self.inner = inner
             self.query = query
             self.train_ratings = train_ratings
+            self._tag = query_tag
 
         def recommend(self, user_id, top_k):
             exclude = set(self.train_ratings.get(user_id, []))
             result = self.inner.invoke(
                 user_id=user_id, query=self.query, top_k=top_k,
                 exclude_ids=exclude,
-                session_id=f"eval_user_{user_id}",
+                session_id=f"eval_{self._tag}_u{user_id}",
             )
             # 首 3 用户采样工具调用路径
             if not hasattr(self, "_tool_samples"):
@@ -389,7 +390,7 @@ def main():
             print(f"  [全类型, {len(filtered_test)} users]")
 
         label = f"q{qi}"
-        agent_eval = AgentEvaluator(react_agent, query, train_ratings)
+        agent_eval = AgentEvaluator(react_agent, query, train_ratings, query_tag=f"q{qi}")
         agent_metrics = evaluate(agent_eval, filtered_test, train_ratings, top_k_values, label=label)
         print(f"  Users: {agent_metrics[label + '_users_evaluated']}"
               f" / {agent_metrics[label + '_users_total']}")
