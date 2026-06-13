@@ -130,6 +130,8 @@ def main():
     parser.add_argument("--all-queries", action="store_true")
     parser.add_argument("--top-k", type=int, default=20)
     parser.add_argument("--user-id", type=int, default=1)
+    parser.add_argument("--judge-model", type=str, default=None,
+                        help="评估用模型 (默认 deepseek-v4-pro, 可改为 deepseek-chat 等)")
     args = parser.parse_args()
 
     api_key = os.getenv("DEEPSEEK_API_KEY", "")
@@ -138,7 +140,7 @@ def main():
         return
 
     agent_model = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
-    judge_model = "deepseek-v4-flash"  # 评估用独立模型, 降低同模偏差
+    judge_model = args.judge_model or "deepseek-v4-pro"
 
     agent_llm = DeepSeekLLM(api_key=api_key, model=agent_model)
     judge_llm = DeepSeekLLM(api_key=api_key, model=judge_model)
