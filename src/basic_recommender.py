@@ -304,8 +304,11 @@ class BasicRecommender:
         if not query_text:
             return profile_embedding
 
+        # 中文查询 → 翻译为英文后编码 (英文模型直接编码中文 = 噪声)
+        query_for_encode = self._translate_query(query_text)
+
         query_embedding = self.text_model.encode(
-            [query_text],
+            [query_for_encode],
             convert_to_numpy=True,
             normalize_embeddings=True,
         )[0]
@@ -315,6 +318,65 @@ class BasicRecommender:
         if norm == 0.0:
             return profile_embedding
         return (mixed / norm).astype(np.float32)
+
+    @staticmethod
+    def _has_chinese(text: str) -> bool:
+        """检测文本是否包含中文字符"""
+        return any('一' <= c <= '鿿' for c in text)
+
+    @classmethod
+    def _translate_query(cls, query: str) -> str:
+        """将中文查询中的情绪/类型词替换为英文，确保英文模型的编码质量。
+
+        非中文查询原样返回。中文混合查询 (如 '科幻动作') 也尝试翻译类型词。
+        """
+        if not cls._has_chinese(query):
+            return query
+
+        # 中文→英文翻译表 (情绪词 + 类型词)
+        translations = {
+            # 情绪词 (复用 _MOOD_TO_ENGLISH 的映射)
+            "轻松": "lighthearted relaxing feel-good",
+            "搞笑": "funny comedy humorous laugh",
+            "紧张": "tense suspenseful thrilling",
+            "治愈": "healing heartwarming comfort",
+            "烧脑": "mind-bending complex puzzle",
+            "压抑": "dark bleak depressing",
+            "刺激": "exciting thrilling intense",
+            "温暖": "warm heartwarming cozy",
+            "悲伤": "sad tragic emotional",
+            "欢乐": "joyful happy cheerful fun",
+            "热血": "inspiring passionate epic",
+            "恐怖": "horror scary terrifying",
+            "悬疑": "mystery suspense thriller",
+            "浪漫": "romantic love story",
+            "科幻": "science fiction futuristic",
+            # 类型词
+            "动作": "action martial arts",
+            "喜剧": "comedy funny humorous",
+            "剧情": "drama character-driven",
+            "爱情": "romance love story",
+            "惊悚": "thriller suspense",
+            "冒险": "adventure exploration",
+            "奇幻": "fantasy magical",
+            "动画": "animation animated",
+            "纪录片": "documentary factual",
+            "犯罪": "crime criminal",
+            "战争": "war military",
+            # 抽象语义
+            "推荐好看的": "popular highly-rated must-watch",
+            "让人想旅行": "travel adventure wanderlust road movie exploration journey",
+            "电影": "movie",
+        }
+
+        result = query
+        # 按 key 长度降序替换 (长词优先), 前后加空格防止粘连
+        for zh, en in sorted(translations.items(), key=lambda x: -len(x[0])):
+            if zh in result:
+                result = result.replace(zh, f" {en} ")
+        # 清理多余空格
+        result = " ".join(result.split())
+        return result if result != query else f"{query} movie"  # 最少加个 movie 兜底
 
     def _get_user_profile(self, user_id: int) -> Optional[Dict[str, Any]]:
         return self.user_profiles.get(int(user_id))
