@@ -263,7 +263,7 @@ def main():
         print(f"Sampled {len(test_holdout)} users for evaluation")
 
     # ——— Baselines ———
-    from src.basic_recommender import load_movie_stats
+    from src.basic_recommender import load_movie_stats, BasicRecommender
 
     movie_stats = load_movie_stats(full_data_path)
     popular = PopularBaseline(movie_stats)
@@ -337,15 +337,50 @@ def main():
     llm = DeepSeekLLM(api_key=api_key, model=model)
     react_agent = ReActAgent(llm=llm, recommender=recommender)
 
+    # ── 分类评估: query → 相关类型映射 ──
+    QUERY_GENRES = {
+        "科幻动作":      ["Sci-Fi", "Action"],
+        "轻松搞笑":      ["Comedy"],
+        "2020年的悬疑片": ["Mystery", "Thriller"],
+        # 未列出的 query 不过滤 (全量测试集)
+    }
+
+    def filter_test_holdout(test_holdout, allowed_genres, movie_lookup):
+        """过滤测试集: 只保留属于 allowed_genres 的电影。
+        用户如果没有相关类型的测试电影则被剔除。"""
+        filtered = {}
+        for uid, test_ids in test_holdout.items():
+            relevant = [mid for mid in test_ids
+                        if mid in movie_lookup
+                        and any(g in allowed_genres for g in movie_lookup[mid].genres)]
+            if relevant:
+                filtered[uid] = relevant
+        return filtered
+
+    # 构建 movie→genres 索引 (BasicRecommender 的 movie_lookup 与向量后端无关)
+    movie_lookup_for_genre = BasicRecommender().movie_lookup
+
+
     # ── 多 Query 评估 ──
-    agent_recalls = {}   # query_label → Recall@20
+    agent_recalls = {}   # query_label → {full_recall, filtered_recall, ...}
     for qi, query in enumerate(queries):
         query_label = f'"{query}"' if query else "(empty)"
-        print(f"\n[{qi+1}/{len(queries)}] Evaluating: query={query_label}...")
+        allowed_genres = QUERY_GENRES.get(query, None)
+
+        print(f"\n[{qi+1}/{len(queries)}] Evaluating: query={query_label}", end="")
+        if allowed_genres:
+            filtered_test = filter_test_holdout(
+                test_holdout, allowed_genres, movie_lookup_for_genre)
+            print(f"  [过滤到 {', '.join(allowed_genres)}: "
+                  f"{len(filtered_test)} users, "
+                  f"{sum(len(v) for v in filtered_test.values())} test movies]")
+        else:
+            filtered_test = test_holdout
+            print(f"  [全类型, {len(filtered_test)} users]")
 
         label = f"q{qi}"
         agent_eval = AgentEvaluator(react_agent, query, train_ratings)
-        agent_metrics = evaluate(agent_eval, test_holdout, train_ratings, top_k_values, label=label)
+        agent_metrics = evaluate(agent_eval, filtered_test, train_ratings, top_k_values, label=label)
         print(f"  Users: {agent_metrics[label + '_users_evaluated']}"
               f" / {agent_metrics[label + '_users_total']}")
 
@@ -354,32 +389,44 @@ def main():
             for k, v in agent_metrics.items()
             if k.startswith(label + "_")
         }
+        agent_recalls[query_label]["_genres"] = allowed_genres
 
     # ── 综合报告 ──
-    print("\n" + "=" * 80)
-    print("  综合评估报告：多 Query × Recall/NDCG 对比")
-    print("=" * 80)
+    print("\n" + "=" * 90)
+    print("  综合评估报告：分类评估 (过滤 vs 全量)  ×  Recall@20")
+    print("=" * 90)
 
-    pop_r20 = popular_metrics.get("Popular_Recall@20", 0)
-    pop_n20 = popular_metrics.get("Popular_NDCG@20", 0)
+    pop_full_r20 = popular_metrics.get("Popular_Recall@20", 0)
+    pop_full_n20 = popular_metrics.get("Popular_NDCG@20", 0)
 
-    print(f"  {'Query':<28s} {'R@20_pop':>8s} {'R@20_agent':>10s} {'Δ':>8s} {'%':>8s}  |  {'N@20_pop':>8s} {'N@20_agent':>10s}")
-    print(f"  {'-'*28} {'-'*8} {'-'*10} {'-'*8} {'-'*8}  |  {'-'*8} {'-'*10}")
+    # 也计算 Popular 在各分类下的过滤基线
+    print(f"  {'Query':<26s} {'类型过滤':<16s} {'Users':>6s} {'Pop_R@20':>9s} {'Agent_R@20':>10s} {'Agent_N@20':>10s}")
+    print(f"  {'-'*26} {'-'*16} {'-'*6} {'-'*9} {'-'*10} {'-'*10}")
 
     for query_label, metrics in agent_recalls.items():
         agent_r20 = metrics.get("Recall@20", 0)
         agent_n20 = metrics.get("NDCG@20", 0)
-        diff_r = agent_r20 - pop_r20
-        diff_n = agent_n20 - pop_n20
-        pct_r = (diff_r / pop_r20 * 100) if pop_r20 > 0 else 0
-        pct_n = (diff_n / pop_n20 * 100) if pop_n20 > 0 else 0
-        print(f"  {query_label:<28s} {pop_r20:>8.4f} {agent_r20:>10.4f} {diff_r:>+8.4f} {pct_r:>+7.0f}%  |  "
-              f"{pop_n20:>8.4f} {agent_n20:>10.4f}")
+        genres = metrics.get("_genres")
+        genre_str = ", ".join(genres) if genres else "(全类型)"
+        users = metrics.get("users_evaluated", "?")
 
-    print(f"\n  Baseline Popular: Recall@20={pop_r20:.4f}  NDCG@20={pop_n20:.4f}")
+        # Popular baseline in the same filtered test set
+        if genres:
+            filtered_test = filter_test_holdout(
+                test_holdout, genres, movie_lookup_for_genre)
+            pop_filtered = evaluate(
+                popular_eval, filtered_test, train_ratings, top_k_values, label="PopF")
+            pop_filtered_r20 = pop_filtered.get("PopF_Recall@20", 0)
+        else:
+            pop_filtered_r20 = pop_full_r20
+
+        print(f"  {query_label:<26s} {genre_str:<16s} {str(users):>6s} "
+              f"{pop_filtered_r20:>9.4f} {agent_r20:>10.4f} {agent_n20:>10.4f}")
+
+    print(f"\n  Popular (全量) Recall@20 = {pop_full_r20:.4f}  NDCG@20 = {pop_full_n20:.4f}")
     print(f"  Users: {popular_metrics.get('Popular_users_evaluated', 0)}"
           f" / {popular_metrics.get('Popular_users_total', 0)}")
-    print("=" * 80)
+    print("=" * 90)
 
 
 if __name__ == "__main__":
