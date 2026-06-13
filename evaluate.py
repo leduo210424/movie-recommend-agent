@@ -327,6 +327,16 @@ def main():
                 exclude_ids=exclude,
                 session_id=f"eval_user_{user_id}",
             )
+            # 首 3 用户采样工具调用路径
+            if not hasattr(self, "_tool_samples"):
+                self._tool_samples = []
+            if len(self._tool_samples) < 3:
+                self._tool_samples.append({
+                    "user": user_id,
+                    "iters": result.get("iterations", 0),
+                    "decision": (result.get("decision_reason", "") or "")[:120],
+                    "obs": (result.get("observation", "") or "")[:120],
+                })
             recs = result.get("results", [])
             if not recs:
                 return []
@@ -383,6 +393,12 @@ def main():
         agent_metrics = evaluate(agent_eval, filtered_test, train_ratings, top_k_values, label=label)
         print(f"  Users: {agent_metrics[label + '_users_evaluated']}"
               f" / {agent_metrics[label + '_users_total']}")
+
+        # 打印工具调用采样
+        if hasattr(agent_eval, "_tool_samples"):
+            for s in agent_eval._tool_samples:
+                print(f"    [trace u={s['user']} iters={s['iters']}] "
+                      f"decision={s['decision'][:80]}")
 
         agent_recalls[query_label] = {
             k.replace(label + "_", ""): v
