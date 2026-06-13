@@ -1,12 +1,12 @@
 """
-离线评估脚本：对比 ReAct Agent 与 Popular / Random Baseline 的推荐质量。
+离线评估脚本：对比 ReAct Agent 与 Popular Baseline 的推荐质量。
 
 指标：Recall@K, NDCG@K
 切分策略：按时间戳 leave-last-out（每个用户最后 20% 的评分留作测试集）
 
 用法：
-    python evaluate.py --query "推荐好看的电影"        # ReAct Agent vs baselines
-    python evaluate.py --baseline-only                # 只看 Random + Popular
+    python evaluate.py --query "推荐好看的电影"        # ReAct Agent vs Popular baseline
+    python evaluate.py --baseline-only                # 只看 Popular baseline
     python evaluate.py --query "..." --sample-users 50 # 快速验证
 """
 
@@ -112,27 +112,6 @@ class PopularBaseline:
         return result
 
 
-class RandomBaseline:
-    """随机推荐基线：用于校准评估指标下限"""
-
-    def __init__(self, movie_ids: List[int]):
-        ids = list(movie_ids)
-        self._rng = random.Random(42)
-        self._rng.shuffle(ids)
-        self._shuffled = ids
-
-    def recommend(self, user_id: int = None, top_k: int = 10,
-                  exclude_ids: set = None) -> List[int]:
-        exclude = exclude_ids or set()
-        result = []
-        for mid in self._shuffled:
-            if mid not in exclude:
-                result.append(mid)
-            if len(result) >= top_k:
-                break
-        return result
-
-
 def recall_at_k(recommended: List[int], relevant: List[int], k: int) -> float:
     if not relevant:
         return 0.0
@@ -207,38 +186,30 @@ def evaluate(
 
 def print_report(
     popular_metrics: Dict[str, float],
-    random_metrics: Dict[str, float],
     agent_metrics: Dict[str, float],
     top_k_values: List[int],
 ):
     print("\n" + "=" * 72)
-    print("  离线评估报告：Random vs Popular vs ReAct Agent")
+    print("  离线评估报告：Popular vs ReAct Agent")
     print("=" * 72)
 
     for k in top_k_values:
         r_key = f"Recall@{k}"
         n_key = f"NDCG@{k}"
-        rand_r = random_metrics.get(f"Random_{r_key}", 0)
         pop_r = popular_metrics.get(f"Popular_{r_key}", 0)
         agent_r = agent_metrics.get(f"Agent_{r_key}", 0)
-        rand_n = random_metrics.get(f"Random_{n_key}", 0)
         pop_n = popular_metrics.get(f"Popular_{n_key}", 0)
         agent_n = agent_metrics.get(f"Agent_{n_key}", 0)
 
-        pop_vs_rand = ((pop_r - rand_r) / rand_r * 100) if rand_r > 0 else float("inf")
         agent_vs_pop = ((agent_r - pop_r) / pop_r * 100) if pop_r > 0 else float("inf")
-
-        print(f"\n  Recall@{k}:")
-        print(f"    Random:               {rand_r:.4f}")
-        print(f"    Popular (Bayesian):   {pop_r:.4f}  (+{pop_r - rand_r:+.4f} vs Random, {pop_vs_rand:+.0f}%)")
-        print(f"    ReAct Agent:          {agent_r:.4f}  (+{agent_r - pop_r:+.4f} vs Popular, {agent_vs_pop:+.0f}%)")
-
-        pop_vs_rand_n = ((pop_n - rand_n) / rand_n * 100) if rand_n > 0 else float("inf")
         agent_vs_pop_n = ((agent_n - pop_n) / pop_n * 100) if pop_n > 0 else float("inf")
 
+        print(f"\n  Recall@{k}:")
+        print(f"    Popular (Bayesian):   {pop_r:.4f}")
+        print(f"    ReAct Agent:          {agent_r:.4f}  (+{agent_r - pop_r:+.4f} vs Popular, {agent_vs_pop:+.0f}%)")
+
         print(f"\n  NDCG@{k}:")
-        print(f"    Random:               {rand_n:.4f}")
-        print(f"    Popular (Bayesian):   {pop_n:.4f}  (+{pop_n - rand_n:+.4f} vs Random, {pop_vs_rand_n:+.0f}%)")
+        print(f"    Popular (Bayesian):   {pop_n:.4f}")
         print(f"    ReAct Agent:          {agent_n:.4f}  (+{agent_n - pop_n:+.4f} vs Popular, {agent_vs_pop_n:+.0f}%)")
 
     print(f"\n  Evaluated users: {agent_metrics.get('Agent_users_evaluated', 0)}"
@@ -248,7 +219,7 @@ def print_report(
 
 def main():
     parser = argparse.ArgumentParser(description="Evaluate movie recommendation agents")
-    parser.add_argument("--baseline-only", action="store_true", help="Run only baselines (Random + Popular)")
+    parser.add_argument("--baseline-only", action="store_true", help="Run only Popular baseline")
     parser.add_argument("--query", type=str, default="",
                         help="Query text for Agent eval (empty = profile-only)")
     parser.add_argument("--sample-users", type=int, default=0,
@@ -299,20 +270,10 @@ def main():
     print(f"  Users evaluated: {popular_metrics['Popular_users_evaluated']}"
           f" / {popular_metrics['Popular_users_total']}")
 
-    # Random baseline for calibration
-    all_movie_ids = list(movie_stats.keys())
-    random_baseline = BaselineEvaluator(RandomBaseline(all_movie_ids), train_ratings)
-    print("\nEvaluating Random Baseline...")
-    random_metrics = evaluate(random_baseline, test_holdout, train_ratings, top_k_values, label="Random")
-    print(f"  Users evaluated: {random_metrics['Random_users_evaluated']}"
-          f" / {random_metrics['Random_users_total']}")
-
     if args.baseline_only:
         for k in top_k_values:
             print(f"  Popular Recall@{k}: {popular_metrics[f'Popular_Recall@{k}']:.4f}")
             print(f"  Popular NDCG@{k}:  {popular_metrics[f'Popular_NDCG@{k}']:.4f}")
-            print(f"  Random Recall@{k}:  {random_metrics[f'Random_Recall@{k}']:.4f}")
-            print(f"  Random NDCG@{k}:   {random_metrics[f'Random_NDCG@{k}']:.4f}")
         return
 
     # ——— Agent (ReAct + Qwen) ———
@@ -368,7 +329,7 @@ def main():
     print(f"  Users evaluated: {agent_metrics['Agent_users_evaluated']}"
           f" / {agent_metrics['Agent_users_total']}")
 
-    print_report(popular_metrics, random_metrics, agent_metrics, top_k_values)
+    print_report(popular_metrics, agent_metrics, top_k_values)
 
 
 if __name__ == "__main__":
