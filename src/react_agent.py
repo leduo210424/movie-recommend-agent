@@ -24,7 +24,7 @@ from src.harness.error_recovery import CircuitBreaker, RetryPolicy, GracefulDegr
 
 logger = logging.getLogger(__name__)
 
-MAX_ITERATIONS = 5
+MAX_ITERATIONS = 3
 
 
 # ── Tool 定义 ──
@@ -648,6 +648,12 @@ class ReActAgent:
         exclude_set = set(exclude_raw) if exclude_raw else None
         session_id = str(state.get("session_id", "default"))
         user_id = state.get("user_id")
+
+        # 用系统传入的 top_k 覆盖 LLM 的选择 (防止 LLM 只请求 5 部然后反复重试)
+        system_top_k = state.get("top_k", 10)
+        for tool in pending_tools:
+            if "top_k" in tool["args"]:
+                tool["args"]["top_k"] = min(int(tool["args"]["top_k"]), max(system_top_k, 10))
 
         messages = state.get("messages", [])
         all_results = list(state.get("tool_results", []))
