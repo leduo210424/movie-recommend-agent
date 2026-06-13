@@ -577,13 +577,21 @@ class BasicRecommender:
         # Extract genre keywords from query
         query_lower = query.lower()
         genre_keywords = {
+            # English
             "action": "Action", "sci-fi": "Sci-Fi", "science fiction": "Sci-Fi",
             "comedy": "Comedy", "drama": "Drama", "horror": "Horror",
             "romance": "Romance", "thriller": "Thriller", "adventure": "Adventure",
             "fantasy": "Fantasy", "animation": "Animation", "documentary": "Documentary",
             "mystery": "Mystery", "crime": "Crime", "war": "War",
             "western": "Western", "musical": "Musical", "children": "Children's",
-            "sci": "Sci-Fi", "fiction": "Sci-Fi"
+            "sci": "Sci-Fi", "fiction": "Sci-Fi",
+            # 中文
+            "动作": "Action", "科幻": "Sci-Fi", "喜剧": "Comedy",
+            "剧情": "Drama", "恐怖": "Horror", "爱情": "Romance",
+            "惊悚": "Thriller", "冒险": "Adventure", "奇幻": "Fantasy",
+            "动画": "Animation", "纪录片": "Documentary", "悬疑": "Mystery",
+            "犯罪": "Crime", "战争": "War", "西部": "Western",
+            "音乐": "Musical", "儿童": "Children's",
         }
         
         target_genres = []
