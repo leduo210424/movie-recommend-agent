@@ -207,8 +207,13 @@ Step 0 — 需要先了解用户吗？
   动作: 调用 get_user_profile (最多1次) 获取用户画像
   然后: 根据返回的画像信息，进入 Step 1-5 选择搜索工具
 
-Step 1 — query 为空？
+Step 1 — query 为空（完全空字符串或仅含空白）？
+  条件: query.strip() == "" — 用户没有输入任何文字
   动作: 调用 search_cold_start (唯一选择，跳过后续步骤)
+  重要: 本步骤仅当 query 真的为空时才触发。只要 query 有任何文字（哪怕一个字），
+        跳过此步骤，继续往下。
+        错误示例: "轻松搞笑" → 有文字 → 不是空查询 → 不要用 cold_start
+        错误示例: user_id 存在但觉得 query 太短 → 仍然不能用 cold_start
 
 Step 2 — query 含有明确的电影类型名称或四位年份数字？
   类型名称包括: Sci-Fi, Comedy, Action, Horror, Romance, Thriller, Drama,
@@ -219,9 +224,14 @@ Step 2 — query 含有明确的电影类型名称或四位年份数字？
   重要: 即使 query 同时包含心情词（如"轻松的科幻片"），只要出现了类型名/年份，
         就选 search_by_filter。filter 是最高优先级搜索工具。
 
-Step 3 — 用户有观影历史？
-  条件: 用户提供了 user_id 且有观影记录
-  动作: 调用 search_by_preference (唯一选择)
+Step 3 — 用户提供了 user_id？
+  条件: 消息中包含"用户ID: 数字"（非"无"），即用户已登录
+  动作: 调用 search_by_preference (唯一选择，跳过后续步骤)
+  重要: ★ 这是最常用的路径 ★
+        只要 user_id 存在（不论是否有历史），都优先用 search_by_preference。
+        它内部会自动处理新用户回退，你不需要先调 get_user_profile 确认。
+        包括心情查询、模糊查询、类型查询——统统走 preference。
+        有画像 → 个性化推荐；无画像 → 自动降级为内容匹配。比 mood/semantic/cold_start 都好。
   重要: ★ 这是最重要的规则 ★
         只要用户有历史，绝大多数查询都应该走 search_by_preference。
         包括心情查询（"轻松搞笑"、"紧张刺激"）、模糊查询（"推荐好看的"）、
@@ -230,24 +240,24 @@ Step 3 — 用户有观影历史？
         search_by_preference 比 search_by_mood/search_semantic 多了一个
         用户画像维度 = 更精准、更个性化。有画像时优先用它。
 
-Step 4 — query 纯粹描述心情/氛围 (且用户无历史)？
+Step 4 — query 纯粹描述心情/氛围 (且用户未登录)？
   心情词包括: 轻松, 紧张, 治愈, 搞笑, 烧脑, 压抑, 刺激, 温暖, 悲伤, 欢乐,
     relaxing, thrilling, healing, funny, dark, exciting, warm, sad, happy
-  动作: 调用 search_by_mood (唯一选择)
-  重要: 仅当用户没有观影历史时才选 mood。有历史 → 回 Step 3 选 preference。
+  动作: 调用 search_by_mood
+  重要: 仅当 user_id 为"无"时才到这里。如果用户已登录 → 回到 Step 3！
 
-Step 5 — query 是复杂/抽象/情节性描述 (且用户无历史)？
-  条件: 以上都不适用，且用户无历史。
+Step 5 — query 是复杂/抽象/情节性描述 (且用户未登录)？
   示例: "让人想旅行的电影", "类似星际穿越但更哲学的", "关于时间循环的悬疑片"
-  动作: 调用 search_semantic，将用户需求翻译为逗号分隔的英文关键词
-  重要: 仅当用户没有观影历史时才选 semantic。有历史 → 回 Step 3 选 preference。
+  动作: 调用 search_semantic
+  重要: 仅当 user_id 为"无"时才到这里。如果用户已登录 → 回到 Step 3！
 
 ═══ 禁止事项 ═══
 - 禁止一次调用多个搜索工具（filter/mood/preference/semantic 之间互斥）
 - 禁止在 search_by_filter 可用时使用 search_by_mood
-- 禁止在有用户画像时使用 search_by_mood 或 search_semantic（应使用 search_by_preference）
+- 禁止在有 user_id 时使用 search_by_mood 或 search_semantic 或 search_cold_start（应使用 search_by_preference）
+- 禁止在有 user_id 且 query 非空时使用 search_cold_start
 - 禁止在有 user_id 时同时调用 get_user_profile 和 search_by_preference（冗余）
-- 遵守决策树优先级：filter > preference > mood > semantic
+- 遵守决策树优先级: user_id 存在 → preference 优先; 否则 filter > mood > semantic
 - get_user_profile 最多调用 1 次——拿到画像后立刻选搜索工具，不要再查第二次
 
 调用工具时确保参数有效。"""
