@@ -137,8 +137,13 @@ def main():
         print("ERROR: DEEPSEEK_API_KEY not set")
         return
 
-    llm = DeepSeekLLM(api_key=api_key, model=os.getenv("DEEPSEEK_MODEL", "deepseek-chat"))
-    agent = ReActAgent(llm=llm)
+    agent_model = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
+    judge_model = "deepseek-v4-flash"  # 评估用独立模型, 降低同模偏差
+
+    agent_llm = DeepSeekLLM(api_key=api_key, model=agent_model)
+    judge_llm = DeepSeekLLM(api_key=api_key, model=judge_model)
+    agent = ReActAgent(llm=agent_llm)
+    print(f"Agent 模型: {agent_model}  |  Judge 模型: {judge_model}")
 
     queries = [
         "科幻动作", "轻松搞笑", "推荐好看的电影",
@@ -195,7 +200,7 @@ def main():
                          "release_year": r.release_year} for r in popular]
 
         # 盲评
-        a_r, p_r, a_n, p_n = llm_judge_blind(llm, query, agent_recs, popular_recs, seed=42 + qi)
+        a_r, p_r, a_n, p_n = llm_judge_blind(judge_llm, query, agent_recs, popular_recs, seed=42 + qi)
 
         win = "+" if a_r > p_r else ("=" if abs(a_r - p_r) < 0.01 else "-")
         cat = QUERY_CATEGORIES.get(query, "其他")
