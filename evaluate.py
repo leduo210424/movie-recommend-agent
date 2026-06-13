@@ -343,15 +343,16 @@ def main():
         query_label = f'"{query}"' if query else "(empty)"
         print(f"\n[{qi+1}/{len(queries)}] Evaluating: query={query_label}...")
 
+        label = f"q{qi}"
         agent_eval = AgentEvaluator(react_agent, query, train_ratings)
-        agent_metrics = evaluate(agent_eval, test_holdout, train_ratings, top_k_values, label=f"q{qi}")
-        print(f"  Users: {agent_metrics['q{qi}_users_evaluated']}"
-              f" / {agent_metrics['q{qi}_users_total']}")
+        agent_metrics = evaluate(agent_eval, test_holdout, train_ratings, top_k_values, label=label)
+        print(f"  Users: {agent_metrics[label + '_users_evaluated']}"
+              f" / {agent_metrics[label + '_users_total']}")
 
         agent_recalls[query_label] = {
-            k.replace(f"q{qi}_", ""): v
+            k.replace(label + "_", ""): v
             for k, v in agent_metrics.items()
-            if k.startswith(f"q{qi}_")
+            if k.startswith(label + "_")
         }
 
     # ── 综合报告 ──
