@@ -61,7 +61,7 @@ TOOLS = [
             ),
             "parameters": {
                 "type": "object",
-                "properties": {"top_k": {"type": "integer"}},
+                "properties": {"top_k": {"type": "integer", "minimum": 1, "maximum": 30, "description": "返回数量 (1-30)"}},
                 "required": ["top_k"],
             },
         },
@@ -85,7 +85,7 @@ TOOLS = [
                 "type": "object",
                 "properties": {
                     "query": {"type": "string"},
-                    "top_k": {"type": "integer"},
+                    "top_k": {"type": "integer", "minimum": 1, "maximum": 30, "description": "返回数量 (1-30)"},
                 },
                 "required": ["query", "top_k"],
             },
@@ -110,7 +110,7 @@ TOOLS = [
                 "type": "object",
                 "properties": {
                     "mood": {"type": "string"},
-                    "top_k": {"type": "integer"},
+                    "top_k": {"type": "integer", "minimum": 1, "maximum": 30, "description": "返回数量 (1-30)"},
                 },
                 "required": ["mood", "top_k"],
             },
@@ -136,7 +136,7 @@ TOOLS = [
                 "properties": {
                     "user_id": {"type": "integer"},
                     "query": {"type": "string"},
-                    "top_k": {"type": "integer"},
+                    "top_k": {"type": "integer", "minimum": 1, "maximum": 30, "description": "返回数量 (1-30)"},
                 },
                 "required": ["user_id", "query", "top_k"],
             },
@@ -165,7 +165,7 @@ TOOLS = [
                         "type": "string",
                         "description": "Comma-separated English keywords: genres themes emotions settings visual_style",
                     },
-                    "top_k": {"type": "integer"},
+                    "top_k": {"type": "integer", "minimum": 1, "maximum": 30, "description": "返回数量 (1-30)"},
                 },
                 "required": ["description", "top_k"],
             },
