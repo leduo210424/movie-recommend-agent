@@ -185,8 +185,8 @@ def main():
     print("  方法论: 混合两套推荐, 不标注来源, 随机打乱后一次性评分")
     print("  已知局限: DeepSeek 同时参与推荐(Agent)和评估(Judge), 存在同模型偏差")
     print("=" * 95)
-    print(f"  {'Query':<48s} {'Cat':<14s} {'A_R20':>7s} {'P_R20':>7s} {'A_N20':>7s} {'Win':>5s}")
-    print(f"  {'-'*48} {'-'*14} {'-'*7} {'-'*7} {'-'*7} {'-'*5}")
+    print(f"  {'Query':<48s} {'Cat':<14s} {'A_R20':>7s} {'P_R20':>7s} {'A_N20':>7s} {'P_N20':>7s} {'Win':>5s}")
+    print(f"  {'-'*48} {'-'*14} {'-'*7} {'-'*7} {'-'*7} {'-'*7} {'-'*5}")
 
     results_by_cat = {}
     for qi, query in enumerate(queries):
@@ -206,10 +206,10 @@ def main():
 
         win = "+" if a_r > p_r else ("=" if abs(a_r - p_r) < 0.01 else "-")
         cat = QUERY_CATEGORIES.get(query, "其他")
-        results_by_cat.setdefault(cat, []).append((a_r, p_r, a_n))
+        results_by_cat.setdefault(cat, []).append((a_r, p_r, a_n, p_n))
 
         display = query[:44] + "..." if len(query) > 46 else query
-        print(f"  {display:<48s} {cat:<14s} {a_r:>7.4f} {p_r:>7.4f} {a_n:>7.4f} {win:>5s}")
+        print(f"  {display:<48s} {cat:<14s} {a_r:>7.4f} {p_r:>7.4f} {a_n:>7.4f} {p_n:>7.4f} {win:>5s}")
 
     # ── 锚点校验 ──
     if args.all_queries:
@@ -226,22 +226,26 @@ def main():
         print()
 
     # ── 分类汇总 ──
-    print(f"  {'Category':<16s} {'#Q':>4s} {'Avg Agent_R':>11s} {'Avg Pop_R':>10s} {'Win%':>8s}")
-    print(f"  {'-'*16} {'-'*4} {'-'*11} {'-'*10} {'-'*8}")
+    print(f"  {'Category':<16s} {'#Q':>4s} {'A_R20':>7s} {'P_R20':>7s} {'A_N20':>7s} {'P_N20':>7s} {'Win':>5s}")
+    print(f"  {'-'*16} {'-'*4} {'-'*7} {'-'*7} {'-'*7} {'-'*7} {'-'*5}")
     for cat, vals in sorted(results_by_cat.items()):
         n = len(vals)
-        avg_agent = sum(v[0] for v in vals) / n
-        avg_pop = sum(v[1] for v in vals) / n
+        avg_a_r = sum(v[0] for v in vals) / n
+        avg_p_r = sum(v[1] for v in vals) / n
+        avg_a_n = sum(v[2] for v in vals) / n
+        avg_p_n = sum(v[3] for v in vals) / n
         wins = sum(1 for v in vals if v[0] > v[1] + 0.01)
-        print(f"  {cat:<16s} {n:>4d} {avg_agent:>11.4f} {avg_pop:>10.4f} {wins:>4d}/{n:<3d}")
+        print(f"  {cat:<16s} {n:>4d} {avg_a_r:>7.4f} {avg_p_r:>7.4f} {avg_a_n:>7.4f} {avg_p_n:>7.4f} {wins:>4d}/{n:<3d}")
 
     all_vals = [v for vals in results_by_cat.values() for v in vals]
     total = len(all_vals)
-    total_agent = sum(v[0] for v in all_vals) / total
-    total_pop = sum(v[1] for v in all_vals) / total
+    total_a_r = sum(v[0] for v in all_vals) / total
+    total_p_r = sum(v[1] for v in all_vals) / total
+    total_a_n = sum(v[2] for v in all_vals) / total
+    total_p_n = sum(v[3] for v in all_vals) / total
     total_wins = sum(1 for v in all_vals if v[0] > v[1] + 0.01)
-    print(f"  {'─'*16} {'─'*4} {'─'*11} {'─'*10} {'─'*8}")
-    print(f"  {'总计':<16s} {total:>4d} {total_agent:>11.4f} {total_pop:>10.4f} {total_wins:>4d}/{total:<3d}")
+    print(f"  {'─'*16} {'─'*4} {'─'*7} {'─'*7} {'─'*7} {'─'*7} {'─'*5}")
+    print(f"  {'总计':<16s} {total:>4d} {total_a_r:>7.4f} {total_p_r:>7.4f} {total_a_n:>7.4f} {total_p_n:>7.4f} {total_wins:>4d}/{total:<3d}")
     print()
     print("  ⚠ 方法局限:")
     print("    1. DeepSeek 同时参与 Agent 推荐和 Judge 评估 (同模型偏差)")
