@@ -140,7 +140,7 @@ def main():
         return
 
     agent_model = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
-    judge_model = args.judge_model or "deepseek-v4-pro"
+    judge_model = args.judge_model or "deepseek-chat"
 
     agent_llm = DeepSeekLLM(api_key=api_key, model=agent_model)
     judge_llm = DeepSeekLLM(api_key=api_key, model=judge_model)
