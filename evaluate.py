@@ -5,9 +5,14 @@
 切分策略：按时间戳 leave-last-out（每个用户最后 20% 的评分留作测试集）
 
 用法：
-    python evaluate.py --query "推荐好看的电影"        # ReAct Agent vs Popular baseline
-    python evaluate.py --baseline-only                # 只看 Popular baseline
-    python evaluate.py --query "..." --sample-users 50 # 快速验证
+    # 单一 query 评估
+    python evaluate.py --query "轻松搞笑" --sample-users 50 --chroma
+
+    # 多 query 综合评估（覆盖全部工具路径）
+    python evaluate.py --queries "科幻动作" "轻松搞笑" "推荐好看的电影" "让人想旅行的电影" --sample-users 50 --chroma
+
+    # 仅 Popular baseline
+    python evaluate.py --baseline-only
 """
 
 from __future__ import annotations
@@ -222,12 +227,22 @@ def main():
     parser.add_argument("--baseline-only", action="store_true", help="Run only Popular baseline")
     parser.add_argument("--query", type=str, default="",
                         help="Query text for Agent eval (empty = profile-only)")
+    parser.add_argument("--queries", type=str, nargs="+", default=None,
+                        help="Multiple queries for comprehensive evaluation. "
+                             "覆盖全部工具路径的推荐集: "
+                             "'科幻动作' '轻松搞笑' '推荐好看的电影' '让人想旅行的电影' ''")
     parser.add_argument("--sample-users", type=int, default=0,
                         help="Randomly sample N users for evaluation (0 = all users)")
     parser.add_argument("--data-dir", default="data/processed", help="Path to processed data")
     parser.add_argument("--chroma", action="store_true",
                         help="Use ChromaDB backend instead of FAISS")
     args = parser.parse_args()
+
+    # ── 构建查询列表 ──
+    if args.queries is not None:
+        queries = args.queries
+    else:
+        queries = [args.query] if args.query else ["(empty)"]
 
     top_k_values = [5, 10, 20]
 
@@ -276,7 +291,7 @@ def main():
             print(f"  Popular NDCG@{k}:  {popular_metrics[f'Popular_NDCG@{k}']:.4f}")
         return
 
-    # ——— Agent (ReAct + Qwen) ———
+    # ——— Agent (ReAct + DeepSeek) ———
     import os
     from src.react_agent import ReActAgent, DeepSeekLLM
 
@@ -286,6 +301,18 @@ def main():
         return
     model = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
     print(f"ReAct Agent: DeepSeekLLM model={model}")
+
+    # ── 向量后端 ──
+    if args.chroma:
+        from src.chroma_store import ChromaMovieStore
+        from src.basic_recommender import BasicRecommender
+        chroma_store = ChromaMovieStore(persist_dir="data/chroma")
+        recommender = BasicRecommender(chroma_store=chroma_store)
+        backend_label = "ChromaDB"
+    else:
+        recommender = None
+        backend_label = "FAISS"
+    print(f"Backend: {backend_label}")
 
     class AgentEvaluator:
         def __init__(self, inner, query, train_ratings):
@@ -298,7 +325,7 @@ def main():
             result = self.inner.invoke(
                 user_id=user_id, query=self.query, top_k=top_k,
                 exclude_ids=exclude,
-                session_id=f"eval_user_{user_id}",  # 每个用户独立 session
+                session_id=f"eval_user_{user_id}",
             )
             recs = result.get("results", [])
             if not recs:
@@ -308,28 +335,50 @@ def main():
             return recs
 
     llm = DeepSeekLLM(api_key=api_key, model=model)
-
-    # ── 向量后端选择 ──
-    if args.chroma:
-        from src.chroma_store import ChromaMovieStore
-        from src.basic_recommender import BasicRecommender
-        chroma_store = ChromaMovieStore(persist_dir="data/chroma")
-        recommender = BasicRecommender(chroma_store=chroma_store)
-        backend_label = "ChromaDB"
-    else:
-        recommender = None   # ReActAgent 内部默认 FAISS
-        backend_label = "FAISS"
-
     react_agent = ReActAgent(llm=llm, recommender=recommender)
-    agent_eval = AgentEvaluator(react_agent, args.query, train_ratings)
 
-    query_label = f'"{args.query}"' if args.query else "(empty)"
-    print(f"\nEvaluating ReAct Agent (query={query_label}, backend={backend_label})...")
-    agent_metrics = evaluate(agent_eval, test_holdout, train_ratings, top_k_values, label="Agent")
-    print(f"  Users evaluated: {agent_metrics['Agent_users_evaluated']}"
-          f" / {agent_metrics['Agent_users_total']}")
+    # ── 多 Query 评估 ──
+    agent_recalls = {}   # query_label → Recall@20
+    for qi, query in enumerate(queries):
+        query_label = f'"{query}"' if query else "(empty)"
+        print(f"\n[{qi+1}/{len(queries)}] Evaluating: query={query_label}...")
 
-    print_report(popular_metrics, agent_metrics, top_k_values)
+        agent_eval = AgentEvaluator(react_agent, query, train_ratings)
+        agent_metrics = evaluate(agent_eval, test_holdout, train_ratings, top_k_values, label=f"q{qi}")
+        print(f"  Users: {agent_metrics['q{qi}_users_evaluated']}"
+              f" / {agent_metrics['q{qi}_users_total']}")
+
+        agent_recalls[query_label] = {
+            k.replace(f"q{qi}_", ""): v
+            for k, v in agent_metrics.items()
+            if k.startswith(f"q{qi}_")
+        }
+
+    # ── 综合报告 ──
+    print("\n" + "=" * 80)
+    print("  综合评估报告：多 Query × Recall/NDCG 对比")
+    print("=" * 80)
+
+    pop_r20 = popular_metrics.get("Popular_Recall@20", 0)
+    pop_n20 = popular_metrics.get("Popular_NDCG@20", 0)
+
+    print(f"  {'Query':<28s} {'R@20_pop':>8s} {'R@20_agent':>10s} {'Δ':>8s} {'%':>8s}  |  {'N@20_pop':>8s} {'N@20_agent':>10s}")
+    print(f"  {'-'*28} {'-'*8} {'-'*10} {'-'*8} {'-'*8}  |  {'-'*8} {'-'*10}")
+
+    for query_label, metrics in agent_recalls.items():
+        agent_r20 = metrics.get("Recall@20", 0)
+        agent_n20 = metrics.get("NDCG@20", 0)
+        diff_r = agent_r20 - pop_r20
+        diff_n = agent_n20 - pop_n20
+        pct_r = (diff_r / pop_r20 * 100) if pop_r20 > 0 else 0
+        pct_n = (diff_n / pop_n20 * 100) if pop_n20 > 0 else 0
+        print(f"  {query_label:<28s} {pop_r20:>8.4f} {agent_r20:>10.4f} {diff_r:>+8.4f} {pct_r:>+7.0f}%  |  "
+              f"{pop_n20:>8.4f} {agent_n20:>10.4f}")
+
+    print(f"\n  Baseline Popular: Recall@20={pop_r20:.4f}  NDCG@20={pop_n20:.4f}")
+    print(f"  Users: {popular_metrics.get('Popular_users_evaluated', 0)}"
+          f" / {popular_metrics.get('Popular_users_total', 0)}")
+    print("=" * 80)
 
 
 if __name__ == "__main__":
