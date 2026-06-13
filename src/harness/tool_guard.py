@@ -101,23 +101,23 @@ class ToolGuard:
         "search_by_preference": ToolPolicy(
             max_calls_per_session=10,
             max_params_size=800,
-            allowed_top_k_range=(1, 20),
+            allowed_top_k_range=(1, 30),
             require_user_context=True,
         ),
         "search_by_filter": ToolPolicy(
             max_calls_per_session=10,
             max_params_size=800,
-            allowed_top_k_range=(1, 20),
+            allowed_top_k_range=(1, 30),
         ),
         "search_by_mood": ToolPolicy(
             max_calls_per_session=5,
             max_params_size=300,
-            allowed_top_k_range=(1, 20),
+            allowed_top_k_range=(1, 30),
         ),
         "search_semantic": ToolPolicy(
             max_calls_per_session=10,
             max_params_size=1000,
-            allowed_top_k_range=(1, 20),
+            allowed_top_k_range=(1, 30),
         ),
     }
 
